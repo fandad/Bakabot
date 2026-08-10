@@ -1,0 +1,262 @@
+<Page
+    x:Class="Bakabot.Views.Pages.AppearancePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:vm="clr-namespace:Bakabot.ViewModels"
+    Title="外观设置"
+    MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Margin="40,48,40,24">
+
+        <StackPanel MaxWidth="800">
+
+            <!-- ═══ 标题 ═══ -->
+            <Grid Margin="0,0,0,32">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <TextBlock
+                    Text="外观设置"
+                    FontSize="36"
+                    FontWeight="Bold"
+                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                    Margin="24,16" />
+            </Grid>
+
+            <!-- ═══ 主题 ═══ -->
+            <TextBlock Text="主题" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent" Padding="16">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="暗色模式" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="切换亮色/暗色主题" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                IsChecked="{Binding IsDarkMode}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,0,0,16" Opacity="0.5" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="背景遮罩不透明度" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="数值越低，背景图片越清晰（设为0则完全透出底图）" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <Slider
+                                Grid.Column="1"
+                                Minimum="0.0"
+                                Maximum="1.0"
+                                Value="{Binding BgOpacity}"
+                                TickFrequency="0.05"
+                                IsSnapToTickEnabled="True"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 程序背景 ═══ -->
+            <TextBlock Text="程序背景" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent" Padding="16">
+                    <StackPanel>
+
+                        <!-- 大拖放区：拖入即换背景 -->
+                        <Border
+                            x:Name="DropZone"
+                            Height="150"
+                            CornerRadius="12"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="2"
+                            AllowDrop="True"
+                            DragOver="DropZone_DragOver"
+                            Drop="DropZone_Drop"
+                            MouseLeftButtonUp="DropZone_Click"
+                            Cursor="Hand"
+                            Margin="0,0,0,16">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Opacity" Value="1" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="🖼️" FontSize="32" HorizontalAlignment="Center" Margin="0,0,0,8" />
+                                <TextBlock Text="把图片拖到这里，松手立即更换背景" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                <TextBlock Text="也可以点击此区域选择图片文件（jpg / png / bmp / webp / gif）" FontSize="11" Opacity="0.5" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 图库：已保存的自定义背景，点击切换 -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="我的背景库（点击切换）" FontSize="13" Opacity="0.7" VerticalAlignment="Center" />
+                            <ui:Button
+                                Grid.Column="1"
+                                Content="恢复默认（无背景）"
+                                Appearance="Secondary"
+                                Padding="12,4"
+                                FontSize="12"
+                                Command="{Binding ClearBackgroundCommand}" />
+                        </Grid>
+
+                        <ItemsControl ItemsSource="{Binding GalleryImages}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:BackgroundItem}">
+                                    <Button
+                                        Command="{Binding DataContext.ApplyGalleryImageCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding}"
+                                        Margin="0,0,10,10"
+                                        Padding="0"
+                                        Cursor="Hand"
+                                        Background="Transparent"
+                                        BorderThickness="2">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border
+                                                                CornerRadius="10"
+                                                                BorderThickness="2"
+                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                Background="{TemplateBinding Background}"
+                                                                Padding="0">
+                                                                <ContentPresenter />
+                                                            </Border>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                        <StackPanel>
+                                            <Image
+                                                Source="{Binding FilePath}"
+                                                Width="130"
+                                                Height="76"
+                                                Stretch="UniformToFill" />
+                                            <TextBlock
+                                                Text="{Binding FileName}"
+                                                FontSize="10"
+                                                Opacity="0.7"
+                                                TextTrimming="CharacterEllipsis"
+                                                HorizontalAlignment="Center"
+                                                Margin="4,2" />
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock
+                            x:Name="GalleryEmptyHint"
+                            Text="还没有自定义背景，拖一张图片进来试试吧"
+                            FontSize="12"
+                            Opacity="0.4"
+                            Margin="0,4,0,0" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 按钮颜色 ═══ -->
+            <TextBlock Text="按钮颜色" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="选择一个基础颜色，所有主要按钮和强调元素会立即换色" FontSize="12" Opacity="0.6" Margin="0,0,0,12" />
+
+                        <ItemsControl ItemsSource="{Binding AccentColors}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:AccentColorOption}">
+                                    <StackPanel Margin="0,0,16,8">
+                                        <Button
+                                            Width="42"
+                                            Height="42"
+                                            Padding="0"
+                                            Cursor="Hand"
+                                            Command="{Binding DataContext.ApplyAccentColorCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip="{Binding Name}">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Grid>
+                                                        <Ellipse Fill="{Binding Hex}" />
+                                                        <Ellipse
+                                                            Stroke="White"
+                                                            StrokeThickness="3"
+                                                            Margin="3"
+                                                            Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" />
+                                                    </Grid>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                        </Button>
+                                        <TextBlock Text="{Binding Name}" FontSize="11" Opacity="0.6" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- 换色兜底提示：个别控件若未即时换色，重启后完全生效 -->
+                        <TextBlock
+                            Text="💡 若个别控件仍未换色，重启启动器后将完全生效。"
+                            FontSize="11"
+                            Opacity="0.45"
+                            Margin="0,8,0,0" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

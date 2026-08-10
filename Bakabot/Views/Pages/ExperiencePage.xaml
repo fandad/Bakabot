@@ -1,0 +1,27 @@
+<Page
+    x:Class="Bakabot.Views.Pages.ExperiencePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="免费体验">
+
+    <Grid Margin="40,48,40,24">
+        <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="32" MaxWidth="560">
+            <TextBlock Text="🚧" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,16" />
+            <TextBlock
+                Text="免费体验暂不可用"
+                FontSize="22" FontWeight="Bold"
+                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                HorizontalAlignment="Center" Margin="0,0,0,12" />
+            <TextBlock
+                Text="原作者官网已关闭，在线免费体验功能随之失效。"
+                FontSize="14" Opacity="0.7" TextWrapping="Wrap" TextAlignment="Center"
+                Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <TextBlock
+                Text="如需体验或咨询，请加 QQ 群 1082669385。"
+                FontSize="14" Opacity="0.7" TextWrapping="Wrap" TextAlignment="Center"
+                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,8,0,0" />
+        </StackPanel>
+    </Grid>
+
+</Page>
