@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+publish/
+
+# IDE / user-specific
+.vs/
+*.user
+*.suo
+
+# Runtime data (generated on first run)
+logs/
+jars/
+plugins/
+viabedrock/
+saves.json
+viaproxy.yml
+viabackwards.yml
+viarewind.yml
+vialegacy.yml
+viaversion.yml
+viabedrock.yml
+viaaprilfools.yml
+
+# OS junk
+Thumbs.db
+desktop.ini
