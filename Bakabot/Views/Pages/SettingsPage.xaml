@@ -1,0 +1,426 @@
+<Page
+    x:Class="Bakabot.Views.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="设置"
+    Loaded="Page_Loaded"
+    MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Margin="40,48,40,24">
+
+        <StackPanel MaxWidth="800">
+
+            <!-- ═══ 标题 ═══ -->
+            <Grid Margin="0,0,0,32">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <TextBlock
+                    Text="设置"
+                    FontSize="36"
+                    FontWeight="Bold"
+                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                    Margin="24,16" />
+            </Grid>
+
+            <!-- ═══ 一键下载 ═══ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock Text="一键下载运行环境" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock Text="依次下载 Node.js 运行时和 ViaProxy（不含基础包）；下载速度较慢，建议挂加速器。" FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <ui:Button
+                            Grid.Column="1"
+                            Content="⚡ 一键下载(基础包除外,原作者官网已关闭)"
+                            Appearance="Primary"
+                            Padding="16,8"
+                            Command="{Binding DownloadAllCommand}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 运行环境 ═══ -->
+            <TextBlock Text="运行环境" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <!-- 统一背景层 -->
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+
+                <!-- 内容层 -->
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="Node.js 运行时" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding DownloadStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <ProgressBar
+                                    x:Name="NodeProgressBar"
+                                    Value="{Binding DownloadProgress}"
+                                    Maximum="100"
+                                    Height="4"
+                                    Margin="0,8,0,0"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+
+                            <ui:Button
+                                x:Name="DownloadNodeBtn"
+                                Grid.Column="1"
+                                Content="下载 Node.js"
+                                Appearance="Info"
+                                Padding="16,6"
+                                Command="{Binding DownloadNodeCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="机器人基础包" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding BaseAgentStatusText}" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="⚠️ 原作者官网已关闭，在线下载已不可用。请到 QQ 群 1082669385 获取基础包，再通过下方「导入本地包」导入使用。" />
+                                <ProgressBar
+                                    x:Name="BaseProgressBar"
+                                    Value="{Binding BaseAgentProgress}"
+                                    Maximum="100"
+                                    Height="4"
+                                    Margin="0,8,0,0"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+
+                            <ui:Button
+                                x:Name="DownloadBaseBtn"
+                                Grid.Column="1"
+                                Content="下载基础包"
+                                Appearance="Info"
+                                Padding="16,6"
+                                Command="{Binding DownloadBaseAgentCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="自定义基础包" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="导入本地 zip 包作为机器人基础模板" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding CustomBaseAgentPath}" FontSize="11" Opacity="0.5" />
+                            </StackPanel>
+
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                Margin="0,0,16,0"
+                                IsChecked="{Binding UseCustomBaseAgent}"
+                                Content="使用自定义"
+                                VerticalAlignment="Center" />
+
+                            <ui:Button
+                                Grid.Column="2"
+                                Content="导入本地包"
+                                Appearance="Secondary"
+                                Padding="16,6"
+                                Command="{Binding ImportCustomBaseAgentCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 协议代理（26.x 直连支持）═══ -->
+            <TextBlock Text="协议代理（26.x 直连支持）" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+
+                        <!-- ViaProxy 功能说明 -->
+                        <Border Margin="16,16,16,0" CornerRadius="8" Padding="12,10"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"
+                                           Text="ViaProxy 是什么？" />
+                                <TextBlock FontSize="12" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="ViaProxy 是 ViaVersion 团队开发的独立协议代理，支持任意 Minecraft 版本之间的协议转换。" />
+                                <TextBlock FontSize="12" Opacity="0.7" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="开启后，选择 26.1、26.2 等新年份命名版本时，机器人无需服务器安装 ViaVersion 就能直接进入 26.x 服务器。" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="注：需要 Java 17+（MC 官方启动器通常已内置）。离线服可直接进入；正版验证服需在下方「正版账号」中配置微软账号；第三方登录（Yggdrasil）服自动回退到兼容模式。" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,12" Opacity="0.5" />
+
+                        <!-- 启用开关 -->
+                        <Grid Margin="16,0,16,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="启用 ViaProxy" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="启用后，26.x 等新版本将通过本地代理实现协议转换" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                IsChecked="{Binding EnableViaProxy}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <!-- ViaProxy JAR 下载 -->
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="ViaProxy JAR" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding ViaProxyStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <ProgressBar
+                                    Value="{Binding ViaProxyProgress}"
+                                    Maximum="100"
+                                    Height="4"
+                                    Margin="0,8,0,0"
+                                    Visibility="{Binding IsDownloadingViaProxy, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                            <ui:Button
+                                Grid.Column="1"
+                                Content="下载 ViaProxy"
+                                Appearance="Info"
+                                Padding="16,6"
+                                Command="{Binding DownloadViaProxyCommand}"
+                                IsEnabled="{Binding IsDownloadingViaProxy, Converter={StaticResource InverseBoolConverter}}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <!-- Java 路径设置 -->
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="Java 运行时" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding JavaStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <ui:TextBox
+                                    Text="{Binding JavaPath, UpdateSourceTrigger=PropertyChanged}"
+                                    FontSize="11"
+                                    Opacity="0.75"
+                                    Margin="0,6,0,0"
+                                    PlaceholderText="留空则自动检测（推荐）"
+                                    Width="260"
+                                    HorizontalAlignment="Left" />
+                            </StackPanel>
+                            <ui:Button
+                                Grid.Column="1"
+                                Content="浏览"
+                                Appearance="Secondary"
+                                Padding="16,6"
+                                Command="{Binding BrowseJavaPathCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <!-- 正版账号管理（正版验证服务器需要） -->
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="正版账号（微软账号）" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding ViaProxyAccountStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="连接在线模式（正版验证）服务器时，由 ViaProxy 使用此账号登录；离线模式服务器无需配置。" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="提示：ViaProxy 登录微软账号时偶发报错属于其自身连接微软服务波动所致（报错即代表登录失败），多试几次一般即可成功。" />
+                                <!-- 极其显眼的服务器地址提示 -->
+                                <Border Margin="0,10,0,0" CornerRadius="8" Padding="12,10"
+                                        Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
+                                    <TextBlock FontSize="13" FontWeight="Bold" TextWrapping="Wrap"
+                                               Foreground="#FFFF9500"
+                                               Text="⚠️ 重要提示：请在里面填入你要加入的正版服务器地址，若是切换服务器，请同时在（配置正版账号）中更换服务器地址！" />
+                                </Border>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:Button
+                                    Content="配置正版账号"
+                                    Appearance="Primary"
+                                    Padding="16,6"
+                                    Command="{Binding OpenViaProxyAccountManagerCommand}" />
+                                <ui:Button
+                                    Content="刷新状态"
+                                    Appearance="Secondary"
+                                    Padding="16,6"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding RefreshStatusCommand}" />
+                            </StackPanel>
+                        </Grid>
+
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 关于 ═══ -->
+            <TextBlock Text="关于" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <!-- 统一背景层 -->
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+
+                <!-- 内容层 -->
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent" Padding="16">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="Bakabot" FontSize="18" FontWeight="Bold" />
+                                    <TextBlock
+                                        Text="{Binding AppVersion, StringFormat=' v{0}'}"
+                                        FontSize="13"
+                                        Opacity="0.6"
+                                        VerticalAlignment="Bottom"
+                                        Margin="4,0,0,2" />
+                                </StackPanel>
+
+                                <TextBlock Text="新一代 Minecraft AI 机器人多开启动器 (原ARCbot)" FontSize="12" Opacity="0.6" Margin="0,0,0,8" />
+
+                                <TextBlock FontSize="12" Opacity="0.5" Margin="0,0,0,2">
+                                    <Run Text="运行时: " />
+                                    <Run Text="{Binding DotNetVersion, Mode=OneWay}" />
+                                </TextBlock>
+
+                                <TextBlock FontSize="12" Opacity="0.5">
+                                    <Run Text="数据目录: " />
+                                    <Run Text="{Binding AppDataPath, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+
+                            <ui:Button
+                                Grid.Column="1"
+                                Content="打开数据目录"
+                                Appearance="Secondary"
+                                Padding="16,6"
+                                Command="{Binding OpenAppDataFolderCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,16" Opacity="0.5" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="启动弹窗" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="禁用启动时的爱发电支持弹窗" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                IsChecked="{Binding DisableAfdianPopup}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,16" Opacity="0.5" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="联系原作者(ARCbot) Q群1082669385" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="支持原作者的开发工作" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <ui:Button
+                                    Content="爱发电"
+                                    Appearance="Info"
+                                    Padding="16,6"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding OpenAfdianCommand}"
+                                    VerticalAlignment="Center" />
+                                <ui:Button
+                                    Content="GitHub"
+                                    Appearance="Secondary"
+                                    Padding="16,6"
+                                    Command="{Binding OpenGithubCommand}"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,16" Opacity="0.5" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="改版作者(Bakabot)" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="*在群内" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <ui:Button
+                                Grid.Column="1"
+                                Content="GitHub"
+                                Appearance="Primary"
+                                Padding="16,6"
+                                Command="{Binding OpenBakabotGithubCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

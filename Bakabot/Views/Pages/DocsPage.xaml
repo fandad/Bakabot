@@ -1,0 +1,220 @@
+<Page
+    x:Class="Bakabot.Views.Pages.DocsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+    Title="帮助文档">
+
+    <Page.Resources>
+        <!-- 文档正文段落样式 -->
+        <Style x:Key="DocP" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+        <Style x:Key="DocH" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,8,0,6" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+        <Style x:Key="DocHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Margin="40,48,40,24">
+
+        <StackPanel MaxWidth="860">
+
+            <!-- ═══ 标题 ═══ -->
+            <Grid Margin="0,0,0,16">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <StackPanel Margin="24,16">
+                    <TextBlock
+                        Text="帮助文档"
+                        FontSize="36"
+                        FontWeight="Bold"
+                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock
+                        Text="本地内置文档，点击各栏目展开阅读。原作者官网已关闭，如仍有疑问请加 QQ 群 1082669385。"
+                        FontSize="13"
+                        Opacity="0.6"
+                        Margin="0,4,0,0" />
+                </StackPanel>
+            </Grid>
+
+            <!-- ═══ 快速上手 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🚀 快速上手（第一次使用必看）" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="1️⃣ 下载运行环境：打开「设置」，点顶部的「⚡ 一键下载(基础包除外)」，会自动依次下载 Node.js 运行时和 ViaProxy。下载速度较慢时建议挂加速器。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="2️⃣ 准备基础包：原作者官网已关闭，「下载基础包」在线功能不可用。请到 QQ 群 1082669385 获取基础包 zip，然后在「设置 → 自定义基础包」里点「导入本地包」并打开「使用自定义」开关。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="3️⃣ 创建实例：首页右下角的蓝色 + 按钮 → 填写服务器地址、端口、机器人昵称、登录方式，以及 API 配置（见下方「API 与模型配置」栏目）→ 保存。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="4️⃣ 启动：在首页实例卡片上点「▶ 启动」，机器人即进入服务器；在「控制台」页可实时查看日志、给机器人发指令。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="5️⃣ 进 26.x 等新版本服务器：无需服务器装任何插件，只要设置里「启用 ViaProxy」开着（默认开），创建实例时选择 26.1 / 26.2 等版本即可直连。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ API 与模型配置 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🧠 API 与模型配置（最重要，机器人不说话先看这里）" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,12"
+                            Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
+                        <TextBlock TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Foreground="#FFFF9500"
+                                   Text="机器人的&quot;大脑&quot;由你配置的大模型提供。LLM_API_URL / LLM_API_KEY / LLM_MODEL 三项任何一项不对，机器人就无法思考、不会说话！" />
+                    </Border>
+
+                    <TextBlock Style="{StaticResource DocH}" Text="三个必填项" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• LLM_API_URL：平台提供的 API 地址，按平台文档原样填写（注意是否带 /v1 结尾）。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• LLM_API_KEY：在平台控制台创建的密钥（API Key）。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• LLM_MODEL：模型名称。必须从平台的模型列表里原样复制，不能自己随便填、不能缩写！例如：doubao-seed-2-1-turbo-260628、doubao-seed-evolving-latest-version。填错一个字符都会导致调用失败。" />
+
+                    <TextBlock Style="{StaticResource DocH}" Text="官方平台（如火山方舟/豆包）" />
+                    <TextBlock Style="{StaticResource DocP}" Text="在控制台创建 API Key 后，确认要用的模型已开通；模型名称以控制台「模型列表 / 推理接入点」里显示的完整名称为准，直接复制粘贴。" />
+
+                    <TextBlock Style="{StaticResource DocH}" Text="第三方中转/代理站（特别注意）" />
+                    <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,10"
+                            Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
+                        <TextBlock TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Foreground="#FFFF9500"
+                                   Text="⚠️ 很多第三方中转站只有一个 API Key 是不够的！还需要到该网站的「模型设置 / 模型接入」里，把你要用的模型接入（绑定）到这个 API 上，否则就算 Key 正确也会报 model not found / 无权限 等错误。模型名同样必须从网站的模型列表里原样复制。" />
+                    </Border>
+
+                    <TextBlock Style="{StaticResource DocH}" Text="视觉 API（额外功能）" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• VISION_MODEL / VISION_API_URL / VISION_API_KEY 只用于「看看 / 截图」看图指令，属于额外功能，不填一般不影响基础功能使用。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 如果要填，必须是支持图片输入的多模态模型（例如 doubao-seed-evolving-latest-version；deepseek-v4-flash 这类纯文本模型不支持）。URL 和 Key 留空时会自动复用上面 LLM 的配置。" />
+
+                    <TextBlock Style="{StaticResource DocH}" Text="对话模式" />
+                    <TextBlock Style="{StaticResource DocP}" Text="whisper = 用 /tell 私信回复；msg = 用 /msg 私信回复；public = 在公屏回复。按服务器是否支持相应命令选择。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 首页与实例管理 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🤖 首页与实例管理" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• ▶ 启动：启动/停止该机器人实例。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• ✏️ 编辑：修改实例的服务器、昵称、版本、API 等全部配置。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 📋 复制：快速克隆一个相同配置的实例（多开用）。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 🧹 清除日志：清空该实例保存在磁盘上的控制台日志。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 🗑 删除：删除实例及其全部文件，不可恢复，请谨慎。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 🔄 一键刷新补丁：对所有实例重新应用最新补丁（如资源包自动接受等），改过基础包或补丁后无需重建实例。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 右下角 + 按钮：创建新实例。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 控制台 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🖥️ 控制台" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• 左侧列出运行中的实例，点击选中后右侧显示它的实时日志。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 底部输入框可以直接向机器人进程发送指令或文本。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 「清屏」只清空当前显示；「强制停止」立即结束选中实例的进程。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 日志会持久化保存，关闭启动器后仍可在下次打开时查看；想彻底清空请用首页卡片上的「🧹 清除日志」。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 插件扩展 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🧩 插件扩展" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• 选择实例后点「导入插件」，可以把本地 .js 技能插件装进该实例，重启实例后生效；右侧垃圾桶按钮可删除插件。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 原作者官网已关闭，在线插件市场与在线开发文档均已失效，但本地导入 .js 插件的功能仍然可用。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 想自己开发技能插件或获取现成插件，请加 QQ 群 1082669385 咨询。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 插件市场 / 免费体验 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🛒 插件市场与免费体验" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• 插件市场：原在线市场随官网关闭已失效，页面仅作展示，实际插件请通过「插件扩展」页本地导入。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 免费体验：提供无需自己配置 API 的体验入口（以页面内说明为准）。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ ViaProxy 与 26.x ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🌐 ViaProxy 与 26.x 服务器直连" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• ViaProxy 是 ViaVersion 团队开发的独立协议代理，支持任意 Minecraft 版本之间的协议转换。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 开启后（设置 → 启用 ViaProxy），创建实例时选择 26.1、26.2 等新年份命名版本，机器人无需服务器安装 ViaVersion 就能直接进入 26.x 服务器。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 需要 Java 17+（MC 官方启动器通常已内置）；Java 路径留空会自动检测，也可手动指定。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 离线服可直接进入；正版验证服需在「设置 → 正版账号」中配置微软账号；第三方登录（Yggdrasil）服自动回退到兼容模式。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 提示：ViaProxy 登录微软账号时偶发报错属于其连接微软服务的波动，报错即登录失败，多试几次一般即可成功。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 外观设置 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🎨 外观设置" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• 暗色模式：切换亮色/暗色主题。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 背景遮罩不透明度：数值越低背景图越清晰，设为 0 完全透出底图。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 程序背景：把图片拖进大框（或点击选文件）立即更换背景；图片会存入背景库，之后可在缩略图里点击切换；「恢复默认（无背景）」回到 Mica 材质。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 按钮颜色：提供 8 种基础色，点击后所有强调按钮（启动、下载、发送等）立即换色并记住选择；删除等固定红色按钮不受影响。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 设置 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="⚙️ 设置" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• ⚡ 一键下载(基础包除外)：依次下载 Node.js 运行时和 ViaProxy；下载慢建议挂加速器。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 下载 Node.js / 下载 ViaProxy：单独下载入口，与一键下载等效。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 下载基础包：原作者官网已关闭，此按钮已不可用；请从 QQ 群获取后通过「自定义基础包 → 导入本地包」使用。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 自定义基础包：导入本地 zip 作为机器人基础模板，打开「使用自定义」后新建实例将基于它。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 正版账号：进入正版验证服务器前必须先在 ViaProxy 里配置微软账号。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 启动弹窗：可永久关闭启动时的爱发电支持弹窗。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 打开数据目录：所有实例、日志、下载内容都存放在该目录（%APPDATA%\Bakabot）。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ 常见问题 ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="❓ 常见问题" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：下载 Node.js / ViaProxy 很慢或失败？&#xA;A：下载源在国外，建议挂加速器后重试。" />
+                    <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：「下载基础包」点了没反应？&#xA;A：原作者官网已关闭，在线下载不可用。请加 QQ 群 1082669385 获取基础包，再通过「导入本地包」导入。" />
+                    <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：机器人启动后不说话/不响应？&#xA;A：先检查 API 三件套：URL 是否正确、Key 是否有效、模型名是否从平台模型列表原样复制。第三方中转站还要确认模型已接入到该 API（见「API 与模型配置」栏目）。" />
+                    <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：「看看 / 截图」指令没反应？&#xA;A：看图是额外功能，需要配置支持图片输入的视觉模型；不配置不影响其他基础功能。" />
+                    <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：开了「屏蔽行动公屏播报」后机器人动作失败也没提示？&#xA;A：这是设计如此——开启后除大模型回复外公屏不发任何消息（含失败提示），失败详情可在控制台日志查看。" />
+                    <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：进 26.x 服务器提示版本不支持？&#xA;A：确认设置里「启用 ViaProxy」已打开、ViaProxy.jar 已下载、Java 17+ 可用，然后重建或编辑实例选择 26.x 版本。" />
+                </StackPanel>
+            </Expander>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>
