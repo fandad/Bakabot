@@ -234,12 +234,12 @@ public partial class CreateInstanceViewModel : ObservableObject
         // ─── 模型 ID 格式校验：仅小写字母/数字/连字符/点，不含斜杠、空格 ───
         if (!IsValidModelId(LlmModel))
         {
-            SetError("模型名称 (LLM_MODEL) 格式不正确：仅支持小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格。");
+            ShowModelIdError("模型名称 (LLM_MODEL)", LlmModel);
             return;
         }
         if (!string.IsNullOrWhiteSpace(VisionModel) && !IsValidModelId(VisionModel))
         {
-            SetError("视觉看图模型 (VISION_MODEL) 格式不正确：仅支持小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格。");
+            ShowModelIdError("视觉看图模型 (VISION_MODEL)", VisionModel);
             return;
         }
 
@@ -315,5 +315,21 @@ public partial class CreateInstanceViewModel : ObservableObject
             return false;
         }
         return true;
+    }
+
+    /// <summary>模型 ID 非法时弹窗提示（错误信息较长，红字会被截断，弹窗更清晰）</summary>
+    private static void ShowModelIdError(string fieldName, string modelId)
+    {
+        var message =
+            $"{fieldName} 格式不正确：\n\n" +
+            $"你填写的是：{modelId}\n\n" +
+            "模型 ID 仅支持小写字母、数字、连字符(-)和点(.)，\n" +
+            "不能包含斜杠(/)或空格。\n\n" +
+            "示例：deepseek-v4-flash-ga-260731";
+        System.Windows.MessageBox.Show(
+            message,
+            "模型 ID 格式错误",
+            System.Windows.MessageBoxButton.OK,
+            System.Windows.MessageBoxImage.Warning);
     }
 }
