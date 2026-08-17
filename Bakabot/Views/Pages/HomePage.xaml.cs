@@ -92,6 +92,22 @@ public partial class HomePage : Page
         }
     }
 
+    private void ExportInstanceLog_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: BotInstance instance })
+        {
+            _viewModel.ExportInstanceLogCommand.Execute(instance);
+        }
+    }
+
+    private void DeleteInstanceDebugLog_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: BotInstance instance })
+        {
+            _viewModel.DeleteInstanceDebugLogCommand.Execute(instance);
+        }
+    }
+
     private void CreateInstance_Click(object sender, RoutedEventArgs e)
     {
         ShowCreateDialog(null);

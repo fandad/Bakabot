@@ -9,7 +9,7 @@
 		<ApplicationIcon>Assets\icon.ico</ApplicationIcon>
 		<AssemblyName>Bakabot</AssemblyName>
 		<RootNamespace>Bakabot</RootNamespace>
-		<Version>2.1.0</Version>
+		<Version>2.2.0</Version>
 		<!-- 1. 强制将所有 C++ 原生库（包括 WPF底层和 WebView2）全部塞进 EXE 中 -->
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 

@@ -49,16 +49,25 @@
                         Opacity="0.35"
                         Margin="0,2,0,0" />
                 </StackPanel>
-                <ui:Button
-                    Grid.Column="1"
-                    Content="🔄 一键刷新补丁"
-                    Appearance="Secondary"
-                    CornerRadius="8"
-                    Padding="14,6"
-                    FontSize="12"
-                    ToolTip="对所有实例重新应用最新补丁（如资源包自动接受），无需重建实例"
-                    Command="{Binding RepatchAllCommand}"
-                    VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ui:Button
+                        Content="🔄 一键刷新补丁"
+                        Appearance="Secondary"
+                        CornerRadius="8"
+                        Padding="14,6"
+                        FontSize="12"
+                        ToolTip="对所有实例重新应用最新补丁（如资源包自动接受），无需重建实例"
+                        Command="{Binding RepatchAllCommand}" />
+                    <ui:Button
+                        Content="🗑️ 一键删除调试记录"
+                        Appearance="Secondary"
+                        CornerRadius="8"
+                        Padding="14,6"
+                        FontSize="12"
+                        Margin="8,0,0,0"
+                        ToolTip="删除所有实例的调试台记录与 console.log（不影响实例数据）"
+                        Command="{Binding ClearAllDebugLogsCommand}" />
+                </StackPanel>
             </Grid>
         </Grid>
 
@@ -196,14 +205,25 @@
                                             Tag="{Binding}" />
 
                                         <ui:Button
-                                            Content="🧹 清除日志"
+                                            Content="📤 导出日志"
                                             Appearance="Secondary"
                                             CornerRadius="8"
                                             Padding="14,6"
                                             FontSize="12"
                                             Margin="0,0,8,0"
-                                            ToolTip="清除该实例的控制台日志"
-                                            Click="ClearInstanceLog_Click"
+                                            ToolTip="导出该实例的调试台记录与故障诊断信息为 txt"
+                                            Click="ExportInstanceLog_Click"
+                                            Tag="{Binding}" />
+
+                                        <ui:Button
+                                            Content="🗑️ 删调试记录"
+                                            Appearance="Secondary"
+                                            CornerRadius="8"
+                                            Padding="14,6"
+                                            FontSize="12"
+                                            Margin="0,0,8,0"
+                                            ToolTip="删除该实例的调试台记录与 console.log（不影响实例数据）"
+                                            Click="DeleteInstanceDebugLog_Click"
                                             Tag="{Binding}" />
 
                                         <ui:Button

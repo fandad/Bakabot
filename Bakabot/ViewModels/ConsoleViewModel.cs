@@ -169,6 +169,17 @@ public partial class ConsoleViewModel : ObservableObject
             _dispatcher.Invoke(() => logs.Clear());
     }
 
+    /// <summary>获取指定实例的内存调试台记录（按时间排序的纯文本行）</summary>
+    public IReadOnlyList<string> GetLogLines(string instanceName)
+    {
+        if (!_logCache.TryGetValue(instanceName, out var logs))
+            return Array.Empty<string>();
+
+        return _dispatcher.Invoke(() =>
+            logs.Select(e => e.Display).ToArray()
+        );
+    }
+
     public void FocusInstance(string instanceName)
     {
         RefreshRunningInstances();

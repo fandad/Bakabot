@@ -9,6 +9,9 @@ using Bakabot.Services;
 
 namespace Bakabot.ViewModels;
 
+using System.Text;
+using Microsoft.Win32;
+
 /// <summary>
 /// 首页 ViewModel：展示实例列表，提供启动/编辑/删除/创建功能。
 /// </summary>
@@ -183,6 +186,184 @@ public partial class HomeViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusMessage = $"❌ 清除日志失败: {ex.Message}";
+        }
+    }
+
+    /// <summary>导出指定实例的调试日志 txt（调试台记录 + 故障诊断信息）</summary>
+    [RelayCommand]
+    private void ExportInstanceLog(BotInstance instance)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("===== Bakabot 实例诊断日志 =====");
+            sb.AppendLine($"导出时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            var appVersion = typeof(HomeViewModel).Assembly.GetName().Version?.ToString(3) ?? "未知";
+            sb.AppendLine($"应用版本: {appVersion}");
+            sb.AppendLine();
+
+            // ─── 实例基本信息 ───
+            sb.AppendLine("【实例信息】");
+            sb.AppendLine($"实例名: {instance.InstanceName}");
+            sb.AppendLine($"服务器: {instance.McHost}:{instance.McPort}");
+            sb.AppendLine($"版本: {instance.McVersion}");
+            sb.AppendLine($"账号: {instance.McUsername} ({instance.McAuthType})");
+            sb.AppendLine($"状态: {instance.Status}");
+            sb.AppendLine();
+
+            // ─── 运行环境诊断 ───
+            sb.AppendLine("【环境诊断】");
+            sb.AppendLine($"Node.js: {(File.Exists(PathHelper.NodeExePath) ? "已安装" : "缺失")}");
+            var srcDir = PathHelper.GetInstanceSrcDir(instance.InstanceName);
+            sb.AppendLine($"入口文件: {(File.Exists(Path.Combine(srcDir, "index.js")) ? "存在" : "缺失")}");
+            sb.AppendLine($"ViaProxy JAR: {(File.Exists(PathHelper.ViaProxyJarPath) ? "存在" : "未下载")}");
+            var envPath = PathHelper.GetInstanceEnvPath(instance.InstanceName);
+            sb.AppendLine($"配置文件: {(File.Exists(envPath) ? "存在" : "缺失")}");
+            sb.AppendLine();
+
+            // ─── 敏感信息脱敏后的 .env 关键项 ───
+            sb.AppendLine("【配置摘要（敏感字段已脱敏）】");
+            try
+            {
+                if (File.Exists(envPath))
+                {
+                    var sensitiveKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "MC_LOGIN_PASSWORD", "LLM_API_KEY", "VISION_API_KEY", "AUTH_SERVER_URL",
+                        "REGISTER_URL", "LLM_API_URL", "VISION_API_URL"
+                    };
+                    foreach (var raw in File.ReadAllLines(envPath))
+                    {
+                        var line = raw.Trim();
+                        if (string.IsNullOrEmpty(line) || line.StartsWith("#")) continue;
+                        var idx = line.IndexOf('=');
+                        if (idx <= 0) continue;
+                        var key = line[..idx].Trim();
+                        var value = line[(idx + 1)..].Trim();
+                        if (sensitiveKeys.Contains(key))
+                            value = value.Length <= 3 ? "***" : value[..2] + "***" + value[^2..];
+                        sb.AppendLine($"{key}={value}");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("(未找到 .env 文件)");
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"(读取 .env 失败: {ex.Message})");
+            }
+            sb.AppendLine();
+
+            // ─── 调试台记录（内存 + 磁盘 console.log 合并，按时间序） ───
+            sb.AppendLine("【调试台记录】");
+            var lines = new List<string>(_consoleViewModel.GetLogLines(instance.InstanceName));
+            var logFile = Path.Combine(PathHelper.GetInstanceDir(instance.InstanceName), "console.log");
+            if (File.Exists(logFile))
+            {
+                try
+                {
+                    foreach (var raw in File.ReadAllLines(logFile))
+                    {
+                        if (!string.IsNullOrWhiteSpace(raw))
+                            lines.Add(raw);
+                    }
+                }
+                catch (IOException)
+                {
+                    sb.AppendLine("(console.log 被运行中的实例占用，无法读取文件，已使用内存记录)");
+                }
+            }
+
+            if (lines.Count == 0)
+            {
+                sb.AppendLine("(暂无调试台记录)");
+            }
+            else
+            {
+                foreach (var line in lines.Distinct())
+                    sb.AppendLine(line);
+            }
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "导出调试日志",
+                Filter = "文本文件 (*.txt)|*.txt",
+                FileName = $"{instance.InstanceName}-调试日志-{DateTime.Now:yyyyMMdd-HHmmss}.txt"
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                File.WriteAllText(dialog.FileName, sb.ToString(), Encoding.UTF8);
+                StatusMessage = $"📤 日志已导出到 {dialog.FileName}";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ 导出日志失败: {ex.Message}";
+        }
+    }
+
+    /// <summary>删除指定实例的调试台记录（内存显示 + 磁盘 console.log，不影响实例数据）</summary>
+    [RelayCommand]
+    private void DeleteInstanceDebugLog(BotInstance instance)
+    {
+        try
+        {
+            _consoleViewModel.ClearLogFor(instance.InstanceName);
+
+            var logFile = Path.Combine(PathHelper.GetInstanceDir(instance.InstanceName), "console.log");
+            if (File.Exists(logFile))
+            {
+                File.Delete(logFile);
+                StatusMessage = $"🗑️ 已删除实例 '{instance.InstanceName}' 的调试记录";
+            }
+            else
+            {
+                StatusMessage = $"🗑️ 已清空实例 '{instance.InstanceName}' 的调试台显示";
+            }
+        }
+        catch (IOException)
+        {
+            StatusMessage = $"🗑️ 已清空屏幕显示；日志文件被运行中的实例占用，重启后自动重置";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ 删除调试记录失败: {ex.Message}";
+        }
+    }
+
+    /// <summary>一键删除所有实例的调试台记录（内存显示 + 磁盘 console.log）</summary>
+    [RelayCommand]
+    private void ClearAllDebugLogs()
+    {
+        try
+        {
+            var deleted = 0;
+            foreach (var instance in Instances)
+            {
+                _consoleViewModel.ClearLogFor(instance.InstanceName);
+                var logFile = Path.Combine(PathHelper.GetInstanceDir(instance.InstanceName), "console.log");
+                try
+                {
+                    if (File.Exists(logFile))
+                    {
+                        File.Delete(logFile);
+                        deleted++;
+                    }
+                }
+                catch (IOException)
+                {
+                    // 运行中的实例文件被占用，跳过（下次启动自动覆盖）
+                }
+            }
+            StatusMessage = deleted > 0
+                ? $"🗑️ 已删除 {deleted} 个实例的调试记录"
+                : "🗑️ 调试台记录已清空（无磁盘日志文件）";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ 一键删除调试记录失败: {ex.Message}";
         }
     }
 
