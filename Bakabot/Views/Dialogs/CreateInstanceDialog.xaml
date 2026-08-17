@@ -165,6 +165,9 @@
                         Text="{Binding LlmModel, UpdateSourceTrigger=PropertyChanged}"
                         PlaceholderText="doubao-..."
                         Margin="0,0,0,12" />
+                    <TextBlock
+                        Text="仅支持小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格"
+                        FontSize="11" Opacity="0.45" TextWrapping="Wrap" Margin="0,-6,0,12" />
 
                     <!-- 💡 视觉 API 为额外功能，不填一般不影响基础功能 -->
                                         <Border CornerRadius="8" Padding="12,10" Margin="0,4,0,12"

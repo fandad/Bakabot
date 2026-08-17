@@ -231,6 +231,18 @@ public partial class CreateInstanceViewModel : ObservableObject
             return;
         }
 
+        // ─── 模型 ID 格式校验：仅小写字母/数字/连字符/点，不含斜杠、空格 ───
+        if (!IsValidModelId(LlmModel))
+        {
+            SetError("模型名称 (LLM_MODEL) 格式不正确：仅支持小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格。");
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(VisionModel) && !IsValidModelId(VisionModel))
+        {
+            SetError("视觉看图模型 (VISION_MODEL) 格式不正确：仅支持小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格。");
+            return;
+        }
+
         // 构建模型
         var instance = new BotInstance
         {
@@ -290,5 +302,18 @@ public partial class CreateInstanceViewModel : ObservableObject
     {
         ErrorMessage = message;
         HasError = true;
+    }
+
+    /// <summary>校验模型 ID 格式：小写字母/数字/连字符/点，不含斜杠与空格</summary>
+    private static bool IsValidModelId(string? modelId)
+    {
+        if (string.IsNullOrWhiteSpace(modelId)) return false;
+        foreach (var ch in modelId)
+        {
+            if (char.IsAsciiLetterLower(ch) || char.IsAsciiDigit(ch) || ch == '-' || ch == '.')
+                continue;
+            return false;
+        }
+        return true;
     }
 }
