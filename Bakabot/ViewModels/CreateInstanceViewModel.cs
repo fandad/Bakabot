@@ -85,7 +85,19 @@ public partial class CreateInstanceViewModel : ObservableObject
     private bool _autoDefendEnabled = false;
 
     [ObservableProperty]
-    private bool _instinctAutoTpLogin = false;
+    private bool _autoAcceptTpa = false;
+
+    [ObservableProperty]
+    private bool _tpaOwnerOnly = true;
+
+    [ObservableProperty]
+    private string _tpaAcceptTrigger = string.Empty;
+
+    [ObservableProperty]
+    private bool _autoLogin = false;
+
+    [ObservableProperty]
+    private bool _deathBack = false;
 
     [ObservableProperty]
     private bool _instinctAutoEat = false;
@@ -159,7 +171,11 @@ public partial class CreateInstanceViewModel : ObservableObject
         ChatTrigger = instance.ChatTrigger;
         TriggerMode = string.IsNullOrWhiteSpace(instance.TriggerMode) ? "hybrid" : instance.TriggerMode;
         AutoDefendEnabled = instance.AutoDefendEnabled;
-        InstinctAutoTpLogin = instance.InstinctAutoTpLogin;
+        AutoAcceptTpa = instance.AutoAcceptTpa;
+        TpaOwnerOnly = instance.TpaOwnerOnly;
+        TpaAcceptTrigger = instance.TpaAcceptTrigger;
+        AutoLogin = instance.AutoLogin;
+        DeathBack = instance.DeathBack;
         InstinctAutoEat = instance.InstinctAutoEat;
         InstinctAutoTool = instance.InstinctAutoTool;
         InstinctAutoDump = instance.InstinctAutoDump;
@@ -195,7 +211,11 @@ public partial class CreateInstanceViewModel : ObservableObject
         ChatTrigger = string.Empty;
         TriggerMode = "hybrid";
         AutoDefendEnabled = false;
-        InstinctAutoTpLogin = false;
+        AutoAcceptTpa = false;
+        TpaOwnerOnly = true;
+        TpaAcceptTrigger = string.Empty;
+        AutoLogin = false;
+        DeathBack = false;
         InstinctAutoEat = false;
         InstinctAutoTool = false;
         InstinctAutoDump = false;
@@ -266,7 +286,11 @@ public partial class CreateInstanceViewModel : ObservableObject
             ChatTrigger = ChatTrigger,
             TriggerMode = TriggerMode,
             AutoDefendEnabled = AutoDefendEnabled,
-            InstinctAutoTpLogin = InstinctAutoTpLogin,
+            AutoAcceptTpa = AutoAcceptTpa,
+            TpaOwnerOnly = TpaOwnerOnly,
+            TpaAcceptTrigger = TpaAcceptTrigger,
+            AutoLogin = AutoLogin,
+            DeathBack = DeathBack,
             InstinctAutoEat = InstinctAutoEat,
             InstinctAutoTool = InstinctAutoTool,
             InstinctAutoDump = InstinctAutoDump,
@@ -304,13 +328,14 @@ public partial class CreateInstanceViewModel : ObservableObject
         HasError = true;
     }
 
-    /// <summary>校验模型 ID 格式：小写字母/数字/连字符/点，不含斜杠与空格</summary>
+    /// <summary>校验模型 ID 格式：字母/数字/连字符/点/下划线/斜杠/冒号/@，不含空格</summary>
     private static bool IsValidModelId(string? modelId)
     {
         if (string.IsNullOrWhiteSpace(modelId)) return false;
         foreach (var ch in modelId)
         {
-            if (char.IsAsciiLetterLower(ch) || char.IsAsciiDigit(ch) || ch == '-' || ch == '.')
+            if (char.IsAsciiLetter(ch) || char.IsAsciiDigit(ch) ||
+                ch == '-' || ch == '.' || ch == '_' || ch == '/' || ch == ':' || ch == '@')
                 continue;
             return false;
         }
@@ -323,9 +348,9 @@ public partial class CreateInstanceViewModel : ObservableObject
         var message =
             $"{fieldName} 格式不正确：\n\n" +
             $"你填写的是：{modelId}\n\n" +
-            "模型 ID 仅支持小写字母、数字、连字符(-)和点(.)，\n" +
-            "不能包含斜杠(/)或空格。\n\n" +
-            "示例：deepseek-v4-flash-ga-260731";
+            "模型 ID 支持大小写字母、数字、连字符(-)、点(.)、下划线(_)、\n" +
+            "斜杠(/)（如 minimaxai/minimax-m3）、冒号(:)和 @，不能包含空格。\n\n" +
+            "示例：deepseek-v4-flash-ga-260731 / minimaxai/minimax-m3";
         System.Windows.MessageBox.Show(
             message,
             "模型 ID 格式错误",

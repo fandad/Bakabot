@@ -10,7 +10,7 @@ namespace Bakabot.Services;
 
 public class UpdateService
 {
-    private readonly string _currentVersion = "2.2.0"; // 你的当前版本号
+    private readonly string _currentVersion = "2.3.0"; // 你的当前版本号
     private readonly string _updateUrl = "http://localhost:3000/update";
     private readonly SettingsService _settingsService;
 

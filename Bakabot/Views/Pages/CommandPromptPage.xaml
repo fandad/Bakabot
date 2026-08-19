@@ -1,0 +1,189 @@
+<Page
+    x:Class="Bakabot.Views.Pages.CommandPromptPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="命令提示词"
+    MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Margin="40,48,40,24">
+
+        <StackPanel MaxWidth="800">
+
+            <!-- ═══ 标题 ═══ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <TextBlock
+                    Text="命令提示词"
+                    FontSize="36"
+                    FontWeight="Bold"
+                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                    Margin="24,16" />
+            </Grid>
+
+            <!-- ═══ 总开关 ═══ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="启用命令提示词（纯关键词模式）" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="开启后，消息中只要包含下面的关键词，机器人就直接执行对应命令，不再经过 AI 思考；没命中的消息照常走原流程。" />
+                                <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="提示：快捷命令前最好加上“!”前缀（如 !回），正常聊天几乎不会用到感叹号开头，能防止误触发。" />
+                            </StackPanel>
+
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                IsChecked="{Binding Enabled}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,8" Opacity="0.5" />
+
+                        <DockPanel Margin="16,4,16,8">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding BlockGame}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="屏蔽关键词命令（游戏内）" FontSize="13" FontWeight="Medium" />
+                                <TextBlock Text="游戏里说关键词直接吞掉：不执行命令，也不进入 AI 思考" FontSize="11" Opacity="0.55" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Margin="16,4,16,8">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding BlockQq}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="屏蔽关键词命令（QQ）" FontSize="13" FontWeight="Medium" />
+                                <TextBlock Text="QQ 里说关键词直接吞掉：不执行命令，也不进入 AI 思考" FontSize="11" Opacity="0.55" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Margin="16,4,16,16">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding SuppressGameReply}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="屏蔽关键词行动公屏播报" FontSize="13" FontWeight="Medium" />
+                                <TextBlock Text="游戏内触发时不发“已执行”回执；QQ 触发的回执照常发" FontSize="11" Opacity="0.55" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 生效范围 ═══ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock Text="生效范围" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock Text="选择“全部实例”或指定某个实例；不在范围内的实例不会加载这些命令" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <ComboBox
+                            Grid.Column="1"
+                            ItemsSource="{Binding ScopeOptions}"
+                            SelectedItem="{Binding SelectedScope, UpdateSourceTrigger=PropertyChanged}"
+                            Width="200"
+                            FontSize="12"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ═══ 关键词命令表 ═══ -->
+            <TextBlock Text="关键词 → 命令" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <Grid Margin="16,16,16,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="关键词（整句包含即触发）" FontSize="12" Opacity="0.6" />
+                            <TextBlock Grid.Column="2" Text="命令（发给游戏执行）" FontSize="12" Opacity="0.6" />
+                        </Grid>
+
+                        <ItemsControl ItemsSource="{Binding Rows}" Margin="16,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="24" />
+                                            <ColumnDefinition Width="2*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <ui:TextBox
+                                            Text="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="例如：!回"
+                                            FontSize="12"
+                                            VerticalAlignment="Center" />
+
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Text="→"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Opacity="0.5" />
+
+                                        <ui:TextBox
+                                            Grid.Column="2"
+                                            Text="{Binding Command, UpdateSourceTrigger=PropertyChanged}"
+                                            PlaceholderText="例如：/home"
+                                            FontSize="12"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,8,0" />
+
+                                        <ui:Button
+                                            Grid.Column="3"
+                                            Content="删除"
+                                            Appearance="Secondary"
+                                            Padding="12,4"
+                                            FontSize="12"
+                                            Click="RemoveRow_Click"
+                                            VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,8" Opacity="0.5" />
+
+                        <ui:Button
+                            Content="＋ 添加一行"
+                            Appearance="Secondary"
+                            Padding="16,6"
+                            Margin="16,0,16,16"
+                            HorizontalAlignment="Left"
+                            Command="{Binding AddRowCommand}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <TextBlock FontSize="11" Opacity="0.45" TextWrapping="Wrap" Margin="4,0,0,8"
+                       Text="说明：命令会直接由机器人发送到游戏内执行（如 /home、/back）；执行后会在触发渠道（游戏私聊或 QQ）回复一句确认。游戏内只有能触发机器人的人（按聊天触发模式）说的关键词才生效，避免别人乱指挥。" />
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

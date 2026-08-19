@@ -85,7 +85,21 @@ public partial class BotInstance : ObservableObject
     private bool _autoDefendEnabled = false;
 
     [ObservableProperty]
-    private bool _instinctAutoTpLogin = false;
+    private bool _autoAcceptTpa = false;
+
+    /// <summary>仅接受主人 TPA（关闭后所有人都可传送，慎用）</summary>
+    [ObservableProperty]
+    private bool _tpaOwnerOnly = true;
+
+    /// <summary>TPA 请求触发关键词（服务器消息，尽量写全，逗号分隔；留空=只识别默认格式）</summary>
+    [ObservableProperty]
+    private string _tpaAcceptTrigger = string.Empty;
+
+    [ObservableProperty]
+    private bool _autoLogin = false;
+
+    [ObservableProperty]
+    private bool _deathBack = false;
 
     [ObservableProperty]
     private bool _instinctAutoEat = false;
@@ -139,7 +153,11 @@ public partial class BotInstance : ObservableObject
             ChatTrigger = ChatTrigger,
             TriggerMode = TriggerMode,
             AutoDefendEnabled = AutoDefendEnabled,
-            InstinctAutoTpLogin = InstinctAutoTpLogin,
+            AutoAcceptTpa = AutoAcceptTpa,
+            TpaOwnerOnly = TpaOwnerOnly,
+            TpaAcceptTrigger = TpaAcceptTrigger,
+            AutoLogin = AutoLogin,
+            DeathBack = DeathBack,
             InstinctAutoEat = InstinctAutoEat,
             InstinctAutoTool = InstinctAutoTool,
             InstinctAutoDump = InstinctAutoDump,

@@ -30,6 +30,12 @@ public partial class SettingsPage : Page
                     ? Visibility.Visible : Visibility.Collapsed;
                 DownloadBaseBtn.IsEnabled = !_viewModel.IsDownloadingBaseAgent;
             }
+            if (e.PropertyName == nameof(SettingsViewModel.IsDownloadingNapCat))
+            {
+                NapCatProgressBar.Visibility = _viewModel.IsDownloadingNapCat
+                    ? Visibility.Visible : Visibility.Collapsed;
+                DownloadNapCatBtn.IsEnabled = !_viewModel.IsDownloadingNapCat;
+            }
         };
     }
 

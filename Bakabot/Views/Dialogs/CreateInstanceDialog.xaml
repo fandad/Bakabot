@@ -164,7 +164,7 @@
                     <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,12"
                             Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
                         <TextBlock
-                            Text="⚠️ 模型 ID 格式：仅小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格"
+                            Text="⚠️ 模型 ID 格式：大小写字母、数字、连字符(-)、点(.)、下划线(_)、斜杠(/)（如 minimaxai/minimax-m3）、冒号(:)和 @，不能包含空格"
                             FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="#FFFF9500" />
                     </Border>
 
@@ -186,7 +186,7 @@
                     <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,12"
                             Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
                         <TextBlock
-                            Text="⚠️ 视觉模型 ID 同样仅支持小写字母、数字、连字符(-)和点(.)，不能包含斜杠或空格；留空则禁用看图功能"
+                            Text="⚠️ 视觉模型 ID 同样支持大小写字母、数字、连字符(-)、点(.)、下划线(_)、斜杠(/)（如 minimaxai/minimax-m3）、冒号(:)和 @，不能包含空格；留空则禁用看图功能"
                             FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="#FFFF9500" />
                     </Border>
 
@@ -269,10 +269,43 @@
                         </DockPanel>
 
                         <DockPanel Margin="0,0,0,16">
-                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding InstinctAutoTpLogin}" VerticalAlignment="Center" />
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding AutoAcceptTpa}" VerticalAlignment="Center" />
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="登录自动传送" FontSize="14" FontWeight="Medium" />
+                                <TextBlock Text="接受 TPA 传送请求" FontSize="14" FontWeight="Medium" />
+                                <TextBlock Text="INSTINCT_TP_ACCEPT：收到传送请求时自动 /tpaccept" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Margin="16,0,0,8">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding TpaOwnerOnly}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="仅接受主人 TPA" FontSize="13" FontWeight="Medium" />
+                                <TextBlock Text="关闭后任何人都能传送到机器人身边，请慎用" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <StackPanel Margin="16,0,0,8">
+                            <TextBlock Text="TPA 触发关键词（尽量写全，逗号分隔）" FontSize="12" Opacity="0.6" Margin="0,0,0,4" />
+                            <ui:TextBox
+                                Text="{Binding TpaAcceptTrigger, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="例如：请求传送到你这里,has requested to teleport to you"
+                                Margin="0,0,0,4" />
+                            <TextBlock Text="填服务器接到 TPA 请求时显示的消息，尽量写全（含玩家名和完整句子），多个用逗号分隔；留空则只识别默认格式" FontSize="11" Opacity="0.5" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <DockPanel Margin="0,0,0,8">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding AutoLogin}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="自动登录" FontSize="14" FontWeight="Medium" />
                                 <TextBlock Text="第三方登录/无login服务器(正版)请关闭防卡住" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Margin="0,0,0,16">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding DeathBack}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="死亡后自动 /back" FontSize="14" FontWeight="Medium" />
+                                <TextBlock Text="INSTINCT_DEATH_BACK" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
                             </StackPanel>
                         </DockPanel>
 
@@ -311,9 +344,10 @@
                             <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding SuppressActionChat}" VerticalAlignment="Center" />
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="屏蔽行动公屏播报" FontSize="14" FontWeight="Medium" />
-                                <TextBlock Text="关闭基础包行动开始/完成时的强制公屏提示（大模型回复不受影响）" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
+                                <TextBlock Text="只屏蔽游戏内公屏播报，发往 QQ 的行动消息不受影响" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
                             </StackPanel>
                         </DockPanel>
+
                         <DockPanel Margin="0,0,0,16">
                             <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding ForbidMining}" VerticalAlignment="Center" />
                             <StackPanel VerticalAlignment="Center">

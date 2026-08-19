@@ -42,6 +42,27 @@ public static class PathHelper
     /// <summary>ViaProxy JAR 存储路径</summary>
     public static string ViaProxyJarPath => Path.Combine(ViaProxyDir, "ViaProxy.jar");
 
+    /// <summary>NapCat QQ 协议端目录（存放下载与运行文件）</summary>
+    public static string NapCatDir => Path.Combine(RootDir, "napcat");
+
+    /// <summary>NapCat 数据工作目录（config/logs/cache 由 NAPCAT_WORKDIR 指向此处）</summary>
+    public static string NapCatWorkDir => Path.Combine(NapCatDir, "workdir");
+
+    /// <summary>NapCat OneBot11 配置目录</summary>
+    public static string NapCatConfigDir => Path.Combine(NapCatWorkDir, "config");
+
+    /// <summary>NapCat 自助包内自带的 node.exe（免装 QQ 的 Windows.Node 包）</summary>
+    public static string NapCatNodeExePath => Path.Combine(NapCatDir, "node.exe");
+
+    /// <summary>NapCat 自助包入口脚本</summary>
+    public static string NapCatIndexJsPath => Path.Combine(NapCatDir, "index.js");
+
+    /// <summary>NapCat 压缩包存储路径</summary>
+    public static string NapCatZipPath => Path.Combine(DownloadsDir, "napcat.zip");
+
+    /// <summary>QQ 白名单存储路径（全局一份）</summary>
+    public static string QQWhitelistPath => Path.Combine(RootDir, "qq_whitelist.json");
+
     /// <summary>Ӧ�������ļ�</summary>
     public static string AppSettingsPath => Path.Combine(RootDir, "settings.json");
 
@@ -71,6 +92,7 @@ public static class PathHelper
         Directory.CreateDirectory(DownloadsDir);
         Directory.CreateDirectory(BackgroundsDir);
         Directory.CreateDirectory(ViaProxyDir);
+        Directory.CreateDirectory(NapCatDir);
     }
 
     /// <summary>

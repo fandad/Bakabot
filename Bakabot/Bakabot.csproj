@@ -9,7 +9,7 @@
 		<ApplicationIcon>Assets\icon.ico</ApplicationIcon>
 		<AssemblyName>Bakabot</AssemblyName>
 		<RootNamespace>Bakabot</RootNamespace>
-		<Version>2.2.0</Version>
+		<Version>2.3.0</Version>
 		<!-- 1. 强制将所有 C++ 原生库（包括 WPF底层和 WebView2）全部塞进 EXE 中 -->
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 
@@ -29,6 +29,12 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.*" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.*" />
 		<PackageReference Include="DnsClient" Version="1.8.*" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- 内置默认背景：首次启动解压到数据目录 backgrounds -->
+		<EmbeddedResource Include="Assets\Backgrounds\default_background.jpeg"
+		                  LogicalName="Bakabot.Assets.default_background.jpeg" />
 	</ItemGroup>
 
 </Project>

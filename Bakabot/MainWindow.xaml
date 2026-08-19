@@ -63,6 +63,14 @@
                     Content="免费体验"
                     Icon="{ui:SymbolIcon Sparkle24}"
                     TargetPageType="{x:Type pages:ExperiencePage}" />
+                <ui:NavigationViewItem
+                    Content="QQ 功能"
+                    Icon="{ui:SymbolIcon Chat24}"
+                    TargetPageType="{x:Type pages:QQPage}" />
+                <ui:NavigationViewItem
+                    Content="命令提示词"
+                    Icon="{ui:SymbolIcon Keyboard24}"
+                    TargetPageType="{x:Type pages:CommandPromptPage}" />
             </ui:NavigationView.MenuItems>
 
             <ui:NavigationView.FooterMenuItems>

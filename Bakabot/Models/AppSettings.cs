@@ -5,6 +5,8 @@ public class AppSettings
     public bool IsDarkMode { get; set; } = true;
     public double BgOpacity { get; set; } = 0.6;
     public string BackgroundImagePath { get; set; } = string.Empty;
+    /// <summary>是否已应用过内置默认背景（首次启动应用一次，之后交给外观设置，恢复无背景仍生效）</summary>
+    public bool BundledBackgroundApplied { get; set; } = false;
     /// <summary>按钮/主题强调色（十六进制，空字符串=跟随系统默认蓝色）</summary>
     public string AccentColor { get; set; } = string.Empty;
 
@@ -23,4 +25,30 @@ public class AppSettings
     public bool EnableViaProxy { get; set; } = true;
     /// <summary>自定义 java.exe 路径（留空则自动检测）</summary>
     public string JavaPath { get; set; } = string.Empty;
+
+    // --- QQ 桥接设置 ---
+    /// <summary>是否启用 QQ 桥接功能</summary>
+    public bool QQEnabled { get; set; } = false;
+    /// <summary>机器人自己的 QQ 号（NapCat 快速登录与 OneBot 配置文件命名）</summary>
+    public string QQBotNumber { get; set; } = string.Empty;
+    /// <summary>是否允许所有 QQ 用户使用（开启后绕过白名单拦截，未绑定玩家按未绑定处理）</summary>
+    public bool QQAllowAll { get; set; } = false;
+    /// <summary>生效的 QQ 群 ID，逗号分隔；留空 = 所有群</summary>
+    public string QQGroupIds { get; set; } = string.Empty;
+    /// <summary>群内触发关键词，逗号分隔；留空 = 仅 @ 机器人触发</summary>
+    public string QQTriggerKeywords { get; set; } = string.Empty;
+
+    // --- 命令提示词设置（全局）---
+    /// <summary>是否启用命令提示词（纯关键词模式）</summary>
+    public bool QQQuickCommandsEnabled { get; set; } = false;
+    /// <summary>生效范围："ALL" = 全部实例，否则为指定实例名</summary>
+    public string QQQuickCommandsScope { get; set; } = "ALL";
+    /// <summary>屏蔽关键词命令（游戏内触发）：命中即吞掉消息，不执行也不思考</summary>
+    public bool QQQuickBlockGame { get; set; } = false;
+    /// <summary>屏蔽关键词命令（QQ 触发）：命中即吞掉消息，不执行也不思考</summary>
+    public bool QQQuickBlockQq { get; set; } = false;
+    /// <summary>屏蔽关键词行动公屏播报：游戏内触发时不发“已执行”回执，QQ 回执照常</summary>
+    public bool QQQuickSuppressGameReply { get; set; } = false;
+    /// <summary>关键词 -> 命令 映射表</summary>
+    public List<QuickCommand> QQQuickCommands { get; set; } = new();
 }

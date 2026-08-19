@@ -152,6 +152,38 @@
                                 Command="{Binding ImportCustomBaseAgentCommand}"
                                 VerticalAlignment="Center" />
                         </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="NapCat 协议端" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding NapCatStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="NapCat 是 QQ 协议端，用于 QQ 桥接功能；下载后到「QQ 功能」页扫码登录。" />
+                                <ProgressBar
+                                    x:Name="NapCatProgressBar"
+                                    Value="{Binding NapCatProgress}"
+                                    Maximum="100"
+                                    Height="4"
+                                    Margin="0,8,0,0"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+
+                            <ui:Button
+                                x:Name="DownloadNapCatBtn"
+                                Grid.Column="1"
+                                Content="下载 NapCat"
+                                Appearance="Info"
+                                Padding="16,6"
+                                Command="{Binding DownloadNapCatCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
                     </StackPanel>
                 </Border>
             </Grid>

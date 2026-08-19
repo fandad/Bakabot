@@ -11,6 +11,315 @@ namespace Bakabot.Services;
 /// </summary>
 public class PatchService
 {
+    /// <summary>拆分版自动传送/登录/死亡回城本能源码（按 .env 开关独立控制）</summary>
+    private const string TpAcceptInstinctSource = @"
+/**
+ * 自动传送 / 自动登录 / 死亡回城（拆分版）
+ *
+ * 三个功能由启动器“行动设置”独立控制（.env 写入）：
+ * - 接受 TPA（INSTINCT_TP_ACCEPT）：收到传送请求自动 /tpaccept
+ *     · TPA_OWNER_ONLY=true（默认）：仅接受主人请求
+ *     · TPA_OWNER_ONLY=false：所有人都自动接受（慎用）
+ *     · TPA_ACCEPT_TRIGGER：服务器消息关键词（尽量写全），逗号分隔，包含即触发；留空只识别默认格式
+ * - 自动登录（INSTINCT_AUTO_LOGIN）：进服后 /l 密码
+ * - 死亡 back（INSTINCT_DEATH_BACK）：死亡后 /back
+ */
+const { sendToOwner } = require('../utils/chat');
+
+class StrictAutoTeleportLogin {
+  constructor(bot, config = {}) {
+    this.bot = bot;
+
+    // 支持逗号分隔的多主人名单
+    this.ownerNames = String(config.ownerName || process.env.MC_OWNER_NAME || '')
+      .split(/[,，]/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    this.ownerNameLower = String(this.ownerNames[0] || '').toLowerCase();
+    this.loginPassword = config.loginPassword || process.env.MC_LOGIN_PASSWORD || '';
+
+    // 功能开关（优先 config，兜底读 .env）
+    this.acceptEnabled = config.acceptEnabled !== undefined ? config.acceptEnabled : (process.env.INSTINCT_TP_ACCEPT === 'true');
+    this.ownerOnly = config.ownerOnly !== undefined ? config.ownerOnly : (process.env.TPA_OWNER_ONLY !== 'false');
+    this.loginEnabled = config.loginEnabled !== undefined ? config.loginEnabled : (process.env.INSTINCT_AUTO_LOGIN === 'true');
+    this.backEnabled = config.backEnabled !== undefined ? config.backEnabled : (process.env.INSTINCT_DEATH_BACK === 'true');
+
+    // 关键词触发（逗号分隔，包含即触发）
+    this.triggerKeywords = String(config.triggerKeywords || process.env.TPA_ACCEPT_TRIGGER || '')
+      .split(/[,，]/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+
+    this.acceptCommand = config.acceptCommand || '/tpaccept';
+    this.backCommand = config.backCommand || '/back';
+
+    this.loginDelay = config.loginDelay !== undefined ? config.loginDelay : 5000;
+    this.freezeBeforeAccept = config.freezeBeforeAccept !== undefined ? config.freezeBeforeAccept : 300;
+    this.freezeAfterAccept = config.freezeAfterAccept !== undefined ? config.freezeAfterAccept : 1200;
+    this.acceptCooldown = config.acceptCooldown !== undefined ? config.acceptCooldown : 2000;
+    this.backDelay = config.backDelay !== undefined ? config.backDelay : 2000;
+
+    this.debug = config.debug !== undefined ? config.debug : true;
+
+    this._accepting = false;
+    this._lastAcceptAt = 0;
+    this._dead = false;
+    this._didLoginSequence = false;
+    this._timers = new Set();
+
+    this._onMessage = this._onMessage.bind(this);
+    this._onSpawn = this._onSpawn.bind(this);
+    this._onLogin = this._onLogin.bind(this);
+    this._onDeath = this._onDeath.bind(this);
+  }
+
+  mount() {
+    this.bot.on('message', this._onMessage);
+    this.bot.on('messagestr', this._onMessage);
+    this.bot.on('spawn', this._onSpawn);
+    this.bot.on('login', this._onLogin);
+    this.bot.on('death', this._onDeath);
+
+    this._log('模块已挂载');
+    this._log('接受TPA=' + this.acceptEnabled + ' 仅主人=' + this.ownerOnly + ' 自动登录=' + this.loginEnabled + ' 死亡back=' + this.backEnabled);
+    if (this.acceptEnabled && this.triggerKeywords.length > 0) {
+      this._log('TPA触发关键词: ' + this.triggerKeywords.join(' | '));
+    }
+  }
+
+  unmount() {
+    this.bot.off('message', this._onMessage);
+    this.bot.off('messagestr', this._onMessage);
+    this.bot.off('spawn', this._onSpawn);
+    this.bot.off('login', this._onLogin);
+    this.bot.off('death', this._onDeath);
+
+    for (const t of this._timers) clearTimeout(t);
+    this._timers.clear();
+
+    this._log('模块已卸载');
+  }
+
+  _log() {
+    if (!this.debug) return;
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift('[StrictTP+Login]');
+    console.log.apply(console, args);
+  }
+
+  _setTimer(fn, ms) {
+    const t = setTimeout(() => {
+      this._timers.delete(t);
+      fn();
+    }, ms);
+    this._timers.add(t);
+    return t;
+  }
+
+  _sleep(ms) {
+    return new Promise((resolve) => this._setTimer(resolve, ms));
+  }
+
+  _extractText(msgLike) {
+    if (typeof msgLike === 'string') return msgLike;
+    if (!msgLike) return '';
+    if (typeof msgLike.toString === 'function') return msgLike.toString();
+    return String(msgLike);
+  }
+
+  _stripColorCodes(s) {
+    return (s || '').replace(/§[0-9a-fk-or]/gi, '');
+  }
+
+  _normalizeSpaces(s) {
+    return (s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * 解析传送请求发起人（标准格式，兼容主流 EssentialsX）：
+   * - 玩家名 请求传送到你这里
+   * - 玩家名 请求传送到你的位置
+   * - 玩家名 请求传送到他们的位置
+   * - 玩家名 has requested to teleport to you
+   * - 玩家名 has requested that you teleport to them
+   */
+  _parseTeleportRequest(rawText) {
+    const clean = this._normalizeSpaces(this._stripColorCodes(rawText));
+    if (!clean) return null;
+
+    let m = clean.match(/^([\u4e00-\u9fa5A-Za-z0-9_]{2,16})\s*请求传送到你这里?/);
+    if (m) return { requester: m[1], type: 'tpa' };
+
+    m = clean.match(/^([\u4e00-\u9fa5A-Za-z0-9_]{2,16})\s*请求传送到你的位置?/);
+    if (m) return { requester: m[1], type: 'tpa' };
+
+    m = clean.match(/^([\u4e00-\u9fa5A-Za-z0-9_]{2,16})\s*请求传送到他们的位置?/);
+    if (m) return { requester: m[1], type: 'tpahere' };
+
+    m = clean.match(/^([\u4e00-\u9fa5A-Za-z0-9_]{2,16})\s*has requested to teleport to you/i);
+    if (m) return { requester: m[1], type: 'tpa' };
+
+    m = clean.match(/^([\u4e00-\u9fa5A-Za-z0-9_]{2,16})\s*has requested that you teleport to them/i);
+    if (m) return { requester: m[1], type: 'tpahere' };
+
+    return null;
+  }
+
+  _containsTrigger(raw) {
+    if (this.triggerKeywords.length === 0) return false;
+    const lower = String(raw).toLowerCase();
+    return this.triggerKeywords.some(function (k) {
+      return k && lower.indexOf(k.toLowerCase()) !== -1;
+    });
+  }
+
+  _onMessage(msgLike) {
+    if (!this.acceptEnabled) return;
+    const raw = this._extractText(msgLike);
+    if (!raw) return;
+
+    const parsed = this._parseTeleportRequest(raw);
+    const triggered = !!parsed || this._containsTrigger(raw);
+    if (!triggered) return;
+
+    // 仅主人模式
+    if (this.ownerOnly) {
+      if (parsed) {
+        var matchedOwner = this.ownerNames.some(function (n) {
+          return n && n.toLowerCase() === parsed.requester.toLowerCase();
+        });
+        if (!matchedOwner) {
+          this._log('拒绝非主人请求: ' + parsed.requester + ' (' + parsed.type + ')');
+          return;
+        }
+      } else {
+        // 关键词命中但解析不到玩家名：只有消息里包含某个主人名才接受
+        var lowerRaw = String(raw).toLowerCase();
+        var hitOwner = this.ownerNames.some(function (n) {
+          return n && lowerRaw.indexOf(n.toLowerCase()) !== -1;
+        });
+        if (!hitOwner) {
+          this._log('关键词命中但消息里没有主人名，忽略');
+          return;
+        }
+      }
+      this._log('识别到主人请求 (' + (parsed ? parsed.type : '关键词') + ')，准备自动接受');
+    } else {
+      this._log('自动接受 TPA（所有人模式）: ' + (parsed ? parsed.requester : '关键词命中'));
+    }
+
+    this._tryAcceptTeleport();
+  }
+
+  async _tryAcceptTeleport() {
+    const now = Date.now();
+    if (this._accepting) return;
+    if (this._dead) return;
+    if (now - this._lastAcceptAt < this.acceptCooldown) {
+      this._log('命中接受冷却，跳过本次');
+      return;
+    }
+
+    this._accepting = true;
+    this._lastAcceptAt = now;
+
+    try {
+      this._freezeMovement();
+      this._log('已冻结移动，' + this.freezeBeforeAccept + 'ms 后发送 ' + this.acceptCommand);
+
+      await this._sleep(this.freezeBeforeAccept);
+      sendToOwner(this.bot, this.acceptCommand);
+      this._log('已发送：' + this.acceptCommand);
+
+      this._log('继续冻结 ' + this.freezeAfterAccept + 'ms，等待传送稳定');
+      await this._sleep(this.freezeAfterAccept);
+    } catch (err) {
+      this._log('自动接受失败:', err && err.message);
+    } finally {
+      this._unfreezeMovement();
+      this._accepting = false;
+      this._log('传送接受流程结束');
+    }
+  }
+
+  _onLogin() {
+    this._log('收到 login 事件 (已连接到服务器)');
+    this._startLoginSequence('login');
+  }
+
+  _onSpawn() {
+    this._dead = false;
+    this._log('收到 spawn 事件 (已进入世界)');
+    this._startLoginSequence('spawn');
+  }
+
+  _startLoginSequence(source) {
+    if (!this.loginEnabled) {
+      this._log('自动登录未开启，跳过 (' + source + ')');
+      this._didLoginSequence = true;
+      return;
+    }
+    if (this._didLoginSequence) {
+      this._log('登录流程已执行过，本次 ' + source + ' 跳过');
+      return;
+    }
+    if (!this.loginPassword) {
+      this._log('警告：未配置 loginPassword，跳过 /l (来自 ' + source + ')');
+      this._didLoginSequence = true;
+      return;
+    }
+
+    this._didLoginSequence = true;
+    this._log('登录流程启动 (触发源 ' + source + ')，' + this.loginDelay + 'ms 后发送 /l ******');
+
+    this._setTimer(() => {
+      try {
+        sendToOwner(this.bot, '/l ' + this.loginPassword);
+        this._log('步骤1完成：已发送 /l ******');
+      } catch (err) {
+        this._log('步骤1失败：发送 /l 失败 ->', err && err.message);
+      }
+    }, this.loginDelay);
+  }
+
+  _onDeath() {
+    if (!this.backEnabled) {
+      this._log('死亡 back 未开启，跳过');
+      return;
+    }
+    this._dead = true;
+    this._log('检测到死亡，' + this.backDelay + 'ms 后执行 ' + this.backCommand);
+
+    this._setTimer(() => {
+      try {
+        sendToOwner(this.bot, this.backCommand);
+        this._log('已发送：' + this.backCommand);
+      } catch (err) {
+        this._log('发送 ' + this.backCommand + ' 失败:', err && err.message);
+      }
+    }, this.backDelay);
+  }
+
+  _freezeMovement() {
+    const states = ['forward', 'back', 'left', 'right', 'jump', 'sprint', 'sneak'];
+    for (const s of states) this.bot.setControlState(s, false);
+
+    if (this.bot.pathfinder && typeof this.bot.pathfinder.isMoving === 'function' && this.bot.pathfinder.isMoving()) {
+      try {
+        this.bot.pathfinder.stop();
+        this._log('已停止 pathfinder 移动');
+      } catch (_) {}
+    }
+  }
+
+  _unfreezeMovement() {
+    // 不恢复按键状态，交给上层任务系统重新下发
+  }
+}
+
+module.exports = StrictAutoTeleportLogin;
+";
+
     public void PatchInstance(string instanceName)
     {
         var srcDir = PathHelper.GetInstanceSrcDir(instanceName);
@@ -27,6 +336,9 @@ public class PatchService
         content = PatchEnvPatch(content);
         content = PatchChatTrigger(content);
         content = PatchMsgTellMode(content);
+        content = PatchQQBridgeV2(content);
+        content = PatchTpSplitMount(content);
+        content = PatchQuickCommands(content);
         content = PatchCreateBotOptions(content);
 
         if (content != original)
@@ -43,6 +355,8 @@ public class PatchService
 
         // utils/chat.js 的 /msg 私信模式支持（TELL_MODE=msg）
         PatchTellModeChatUtils(srcDir);
+        PatchTpAcceptInstinct(srcDir);
+        PatchLlmService(srcDir);
     }
 
     /// <summary>
@@ -73,6 +387,9 @@ public class PatchService
         content = PatchEnvPatch(content);
         content = PatchChatTrigger(content);
         content = PatchMsgTellMode(content);
+        content = PatchQQBridgeV2(content);
+        content = PatchTpSplitMount(content);
+        content = PatchQuickCommands(content);
 
         File.WriteAllText(indexJs, content, Encoding.UTF8);
 
@@ -81,6 +398,8 @@ public class PatchService
 
         // /msg 私信模式补丁同步刷新（幂等，已有标记则跳过）
         PatchTellModeChatUtils(srcDir);
+        PatchTpAcceptInstinct(srcDir);
+        PatchLlmService(srcDir);
     }
 
     /// <summary>
@@ -374,37 +693,6 @@ public class PatchService
       } catch(e) {}
     }
 
-    // 多主人支持：基础包的 StrictAutoTeleportLogin 只认单一主人名，
-    // 替换其 _onMessage 使其认得全部主人名单里的任何一位发起的传送
-    function __wrapTpa() {
-      try {
-        var __TPA = require('./instincts/autoTeleportAndLogin');
-        if (__TPA && __TPA.prototype && !__TPA.prototype.__bakabotTpaPatched) {
-          __TPA.prototype.__bakabotTpaPatched = true;
-          __TPA.prototype._onMessage = function(msgLike) {
-            var raw = this._extractText ? this._extractText(msgLike) : String(msgLike || '');
-            if (!raw) return;
-            var parsed = this._parseTeleportRequest(raw);
-            if (!parsed) return;
-            var owners = __owners();
-            var req = String(parsed.requester).toLowerCase();
-            var matched = null;
-            for (var i = 0; i < owners.length; i++) {
-              if (String(owners[i]).toLowerCase() === req) { matched = owners[i]; break; }
-            }
-            if (!matched) {
-              this._log('拒绝非主人请求: ' + parsed.requester + ' (' + parsed.type + ')');
-              return;
-            }
-            this._log('识别到主人请求: ' + parsed.requester + ' (' + parsed.type + ')，准备自动接受');
-            // 发起传送的主人成为当前服务对象（sendToOwner 等都会指向他）
-            process.env.MC_OWNER_NAME = matched;
-            this._tryAcceptTeleport();
-          };
-        }
-      } catch(e) {}
-    }
-
     // 为每个 bot 安装 emit 网关
     var __mf = require('mineflayer');
     if (!__mf.__bakabotGatePatched) {
@@ -415,8 +703,6 @@ public class PatchService
         __state.bot = __bot; // 供私信回显过滤使用
         // 此刻 index.js 已执行过 dotenv.config()，可以安全加载 LLMService
         __wrapLlm();
-        // 多主人 TPA 识别
-        __wrapTpa();
         // 多主人名单规范化（默认主人 = 第一位）
         try { __normalizeOwnerEnv(); } catch(e) {}
         try {
@@ -578,7 +864,7 @@ public class PatchService
             content = Regex.Replace(content,
                 "const\\s*\\{\\s*sendToOwner\\s*\\}\\s*=\\s*require\\((['\"][^'\"\\r\\n]*utils/chat['\"])\\)\\s*;",
                 "const { sendToOwner: __bakabotRealSTO } = require($1); // __bakabot_action_chat_gate__\n" +
-                "const sendToOwner = function (b, msg) { if (process.env.SUPPRESS_ACTION_CHAT === 'true' && !(typeof msg === 'string' && msg.startsWith('/'))) return; return __bakabotRealSTO.apply(null, arguments); }; // __bakabot_action_chat_gate__");
+                "const sendToOwner = function (b, msg) { if (process.env.SUPPRESS_ACTION_CHAT === 'true' && !(typeof msg === 'string' && msg.startsWith('/')) && !(global.__bakabotQQ && global.__bakabotQQ.active)) return; return __bakabotRealSTO.apply(null, arguments); }; // __bakabot_action_chat_gate__");
         }
 
         // 门禁行动文件里直接调用 bot.chat 的播报。
@@ -586,12 +872,577 @@ public class PatchService
         // 其余文件里 / 开头的内容同样视为指令透传
         if (fileName != "Command.js" && content.Contains("this.bot.chat("))
         {
-            content = "function __bakabotSay(b, m) { if (process.env.SUPPRESS_ACTION_CHAT !== 'true' || (typeof m === 'string' && m.startsWith('/'))) b.chat(m); } // __bakabot_action_chat_gate__\n" + content;
+            content = "function __bakabotSay(b, m) { if (process.env.SUPPRESS_ACTION_CHAT !== 'true' || (typeof m === 'string' && m.startsWith('/')) || (global.__bakabotQQ && global.__bakabotQQ.active)) b.chat(m); } // __bakabot_action_chat_gate__\n" + content;
             content = content.Replace("this.bot.chat(", "__bakabotSay(this.bot, ");
         }
 
         if (content != original)
             File.WriteAllText(file, content, Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// QQ 桥接补丁（index.js 注入）：
+    /// - 拦截控制台输入中 "QQCMD {json}" 行，直接送入 handleMessage 指令管道（不发送到游戏公屏）
+    /// - 会话通道：QQ 指令到达时激活 QQ 通道（记录 QQ 号与绑定玩家名）；游戏内聊天事件到达时切回游戏通道
+    /// - 输出分流：QQ 通道中，发给玩家的回复（含 /tell /msg）与普通聊天/播报 → stdout "[QQ-OUT] {json}"；/ 开头命令仍进游戏
+    /// - LLM 上下文：注入当前 QQ 对话对象；未绑定玩家时提示无法执行需要指定玩家的指令
+    /// </summary>
+    private string PatchQQBridge(string content)
+    {
+        // 先剥离旧版 QQ 桥接补丁（Repatch 时保证能重新注入最新版）
+        content = Regex.Replace(content,
+            @"\r?\n?// ===== (?:Bakabot|ARCbot) QQ 桥接补丁 __(?:bakabot|arcbot)_qq_bridge__ =====[\s\S]*?// ===== END (?:Bakabot|ARCbot) QQ 桥接补丁 =====\r?\n?", "");
+
+        // 剥离失败（无 END 标记等异常情况）时跳过，避免重复注入
+        if (content.Contains("__bakabot_qq_bridge__"))
+            return content;
+
+        var patchCode = @"
+// ===== Bakabot QQ 桥接补丁 __bakabot_qq_bridge__ =====
+(function(){
+  try {
+    if (global.__bakabotQQBridgePatched) return;
+    global.__bakabotQQBridgePatched = true;
+
+    // 当前 QQ 会话通道：{ active, qq, player }；游戏内消息到来时清空切回游戏
+    global.__bakabotQQ = null;
+    global.__bakabotQQBot = null;
+    global.__bakabotQQReady = false;
+
+    function __qqOut(type, text) {
+      try { console.log('[QQ-OUT] ' + JSON.stringify({ type: type, text: String(text || '') })); } catch(e) {}
+    }
+
+    // ── 拦截控制台输入：QQCMD JSON 行 → QQ 指令管道（绝不 bot.chat 发公屏）──
+    var __origCreateInterface = require('readline').createInterface;
+    require('readline').createInterface = function(opts) {
+      var __rl = __origCreateInterface.apply(this, arguments);
+      try {
+        var __origOn = __rl.on.bind(__rl);
+        __rl.on = function(event, listener) {
+          if (event === 'line') {
+            var __origListener = listener;
+            listener = function(line) {
+              var t = String(line || '').trim();
+              if (t.indexOf('QQCMD ') === 0) { __handleQQCmd(t); return; }
+              return __origListener.apply(this, arguments);
+            };
+          }
+          return __origOn(event, listener);
+        };
+      } catch(e) {}
+      return __rl;
+    };
+
+    function __handleQQCmd(line) {
+      var msg = null;
+      try { msg = JSON.parse(line.slice('QQCMD '.length)); } catch(e) {}
+      if (!msg || !msg.text) return;
+      var qq = String(msg.qq || '');
+      var player = String(msg.player || '').trim();
+      if (qq) global.__bakabotQQ = { active: true, qq: qq, player: player || null };
+      __deliverQQ(msg.text, player || qq);
+    }
+
+    // 直接把 QQ 指令送入基础包统一处理链（handleMessage 为主人判定 + LLM 规划）
+    function __deliverQQ(text, speaker) {
+      try {
+        var bot = global.__bakabotQQBot;
+        if (!bot || !bot.entity) { __qqOut('msg', '机器人尚未登录游戏，暂时无法执行指令，请稍后再试。'); return; }
+        if (!global.__bakabotQQReady) { __qqOut('msg', '机器人正在准备中，请稍后再试。'); return; }
+        __wrapQqLlm();
+        // 说话人切换为 QQ 绑定玩家（或 QQ 号），handleMessage 的主人检查据此放行；
+        // 保持到下一条指令（QQ 或游戏内），与聊天触发补丁的“服务对象切换”一致
+        process.env.MC_OWNER_NAME = speaker;
+        console.log('[QQ] 收到指令来自 ' + speaker + ': ' + text);
+        var __p = handleMessage(speaker, text);
+        if (__p && typeof __p.catch === 'function') __p.catch(function(e){ console.log('[QQ] 指令处理异常: ' + (e && e.message)); });
+      } catch(e) {
+        console.log('[QQ] 指令处理失败: ' + (e && e.message));
+      }
+    }
+
+    // LLM 上下文：当前对话对象（QQ 用户）+ 未绑定提示
+    function __wrapQqLlm() {
+      try {
+        var __llm = require('./services/LLMService');
+        if (!__llm || typeof __llm.generatePlan !== 'function' || __llm.__bakabotQQGenPatched) return;
+        __llm.__bakabotQQGenPatched = true;
+        var __origGen = __llm.generatePlan;
+        __llm.generatePlan = function(sysPrompt, history, userPrompt) {
+          try {
+            var qq = global.__bakabotQQ;
+            if (qq && qq.active) {
+              if (qq.player) {
+                sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（QQ 用户）\n当前指令来自 QQ 用户「' + qq.player + '」（已绑定游戏 ID）。对方话语中的“我”等称呼均指「' + qq.player + '」；所有需要指定玩家的动作（TeleportRequest 的 target、FollowPlayer 的 player_name、DropItemAction 的 target_player 等）必须填写「' + qq.player + '」。';
+              } else {
+                sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（QQ 用户，未绑定）\n当前指令来自未绑定游戏 ID 的 QQ 用户。若指令需要指定玩家才能执行（如传送、跟随、丢物品给玩家），请直接回复：你还没有绑定游戏玩家，无法执行该指令。不要编造玩家名。';
+              }
+            }
+          } catch(e) {}
+          return __origGen.call(this, sysPrompt, history, userPrompt);
+        };
+      } catch(e) {}
+    }
+
+    // 包装 createBot：记录 bot、监听 spawn 就绪、输出分流、游戏消息切回游戏通道
+    var __mf = require('mineflayer');
+    if (!__mf.__bakabotQQCreatePatched) {
+      __mf.__bakabotQQCreatePatched = true;
+      var __origCreateBot = __mf.createBot;
+      __mf.createBot = function() {
+        var __bot = __origCreateBot.apply(this, arguments);
+        global.__bakabotQQBot = __bot;
+        try { __bot.once('spawn', function(){ global.__bakabotQQReady = true; }); } catch(e) {}
+
+        // 输出分流：QQ 通道中，发给玩家的回复（/tell /msg）与普通聊天/播报 → [QQ-OUT]；/ 开头命令仍进游戏
+        try {
+          var __origChat = __bot.chat.bind(__bot);
+          __bot.chat = function(message) {
+            var s = String(message == null ? '' : message);
+            var qq = global.__bakabotQQ;
+            if (qq && qq.active) {
+              if (s.indexOf('/tell ') === 0 || s.indexOf('/msg ') === 0) {
+                var parts = s.split(' ');
+                if (parts.length > 2) { parts.splice(0, 2); var txt = parts.join(' ').trim(); if (txt) __qqOut('msg', txt); }
+                return;
+              }
+              if (s.charAt(0) !== '/') { __qqOut('msg', s); return; }
+            }
+            return __origChat(s);
+          };
+        } catch(e) {}
+
+        // 游戏内聊天/私信事件到达 → 会话通道切回游戏
+        try {
+          var __origEmit = __bot.emit;
+          __bot.emit = function(eventName) {
+            if ((eventName === 'chat' || eventName === 'messagestr') && global.__bakabotQQ) {
+              global.__bakabotQQ = null;
+            }
+            return __origEmit.apply(__bot, arguments);
+          };
+        } catch(e) {}
+        return __bot;
+      };
+    }
+  } catch(e) {}
+})();
+// ===== END Bakabot QQ 桥接补丁 =====
+";
+        return patchCode + content;
+    }
+
+    /// <summary>
+    /// 拆分“登录自动传送”为三个独立开关（接受TPA/自动登录/死亡back）：
+    /// 修正 index.js 的挂载条件——任一开关开启即挂载本能（旧开关 INSTINCT_AUTO_TP_LOGIN 仍兼容）。
+    /// </summary>
+    private static string PatchTpSplitMount(string content)
+    {
+        var pattern = @"if\s*\(process\.env\.INSTINCT_AUTO_TP_LOGIN\s*===\s*'true'\)\s*\{\s*const autoTPLogin = new AutoTeleportAndLogin\(bot, \{[\s\S]*?autoTPLogin\.mount\(\);\s*\}";
+        var replacement = "if (process.env.INSTINCT_TP_ACCEPT === 'true' || process.env.INSTINCT_AUTO_LOGIN === 'true' || process.env.INSTINCT_DEATH_BACK === 'true' || process.env.INSTINCT_AUTO_TP_LOGIN === 'true') {\n" +
+            "    const autoTPLogin = new AutoTeleportAndLogin(bot, {\n" +
+            "        ownerName: process.env.MC_OWNER_NAME,\n" +
+            "        loginPassword: process.env.MC_LOGIN_PASSWORD,\n" +
+            "        loginDelay: 5000,\n" +
+            "        freezeBeforeAccept: 300,\n" +
+            "        freezeAfterAccept: 1200,\n" +
+            "        backDelay: 2000,\n" +
+            "        acceptCommand: '/tpaccept',\n" +
+            "        backCommand: '/back',\n" +
+            "        debug: true,\n" +
+            "    });\n" +
+            "    autoTPLogin.mount();\n" +
+            "}";
+        return Regex.Replace(content, pattern, replacement);
+    }
+
+    /// <summary>重写 instincts/autoTeleportAndLogin.js：三个功能独立开关 + TPA 关键词触发</summary>
+    private static void PatchTpAcceptInstinct(string srcDir)
+    {
+        var file = Path.Combine(srcDir, "instincts", "autoTeleportAndLogin.js");
+        if (!File.Exists(file)) return;
+        File.WriteAllText(file, TpAcceptInstinctSource, Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// LLMService 补丁：
+    /// 1) 解析 JSON 前先剥掉思考模型输出的 &lt;think&gt;...&lt;/think&gt; 整块（用新变量承接，不重赋值 const）；
+    /// 2) system prompt 末尾追加“只输出 JSON，不要输出任何思考过程或解释”。
+    /// 兼容修复：会先清掉旧版本误注入的“content = ...replace(...)”行。
+    /// </summary>
+    private static void PatchLlmService(string srcDir)
+    {
+        var file = Path.Combine(srcDir, "services", "LLMService.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8);
+
+        // 清理旧补丁行（含错误版本的重赋值行），保证可重复应用
+        content = Regex.Replace(content, @"[^\r\n]*__bakabot_llm_patch__[^\r\n]*\r?\n?", "");
+        content = Regex.Replace(content, @"[^\r\n]*content\s*=\s*String\(content \|\| ''\)\.replace[^\r\n]*\r?\n?", "");
+
+        // 1. 解析前剥掉 <think>...</think>（新变量承接，不碰 const content）
+        content = content.Replace(
+            "let jsonString = content.trim();",
+            "// __bakabot_llm_patch__: 剥掉思考模型输出的 <think>...</think> 整块，避免污染 JSON 解析\n" +
+            "        let jsonString = String(content || '').replace(/<think>[\\s\\S]*?<\\/think>/gi, '').trim();");
+
+        // 2. system prompt 强制只输出 JSON
+        content = content.Replace(
+            "{ role: 'system', content: systemPrompt }",
+            "{ role: 'system', content: systemPrompt + '\\n\\n只输出 JSON，不要输出任何思考过程或解释。' }");
+
+        File.WriteAllText(file, content, Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// 命令提示词补丁（index.js 注入）：
+    /// 整句包含关键词时直接执行对应命令（不走 LLM），
+    /// 配置来自实例根目录 quick_commands.json（启动器页面写入，每条消息实时重读）。
+    /// </summary>
+    private static string PatchQuickCommands(string content)
+    {
+        content = Regex.Replace(content,
+            @"\r?\n?// ===== (?:Bakabot|ARCbot) 命令提示词补丁 __(?:bakabot|arcbot)_quick_cmds__ =====[\s\S]*?// ===== END (?:Bakabot|ARCbot) 命令提示词补丁 =====\r?\n?", "");
+
+        if (content.Contains("__bakabot_quick_cmds__"))
+            return content;
+
+        var patchCode = @"
+// ===== Bakabot 命令提示词补丁 __bakabot_quick_cmds__ =====
+(function(){
+  try {
+    if (global.__bakabotQuickCmdsPatched) return;
+    global.__bakabotQuickCmdsPatched = true;
+
+    var __fs = require('fs');
+    var __path = require('path');
+    var __cmdFile = __path.join(__dirname, '..', 'quick_commands.json');
+
+    function __loadQuickConfig() {
+      try {
+        if (!__fs.existsSync(__cmdFile)) return null;
+        var data = JSON.parse(__fs.readFileSync(__cmdFile, 'utf8'));
+        // 兼容旧格式：裸数组 [ {keyword,command}, ... ]
+        if (Array.isArray(data)) {
+          return { enabled: true, blockGame: false, blockQq: false, suppressGameReply: false, commands: data };
+        }
+        if (!data || typeof data !== 'object') return null;
+        return {
+          enabled: data.enabled !== false,
+          blockGame: data.blockGame === true,
+          blockQq: data.blockQq === true,
+          suppressGameReply: data.suppressGameReply === true,
+          commands: Array.isArray(data.commands) ? data.commands : []
+        };
+      } catch (e) { return null; }
+    }
+
+    function __runQuickCommand(username, message) {
+      try {
+        if (!message || !username) return false;
+        var bot = global.__bakabotQQBot;
+        // 机器人自己说的话不触发
+        if (bot && bot.username && String(username).toLowerCase() === String(bot.username).toLowerCase()) return false;
+
+        var cfg = __loadQuickConfig();
+        if (!cfg || !cfg.enabled || !cfg.commands || cfg.commands.length === 0) return false;
+
+        var lower = String(message).toLowerCase();
+        var hit = null;
+        for (var i = 0; i < cfg.commands.length; i++) {
+          var kw = String(cfg.commands[i].keyword || '').trim();
+          if (kw && lower.indexOf(kw.toLowerCase()) !== -1) { hit = cfg.commands[i]; break; }
+        }
+        if (!hit) return false;
+
+        // 通道判断：QQ 会话通道激活 = QQ 触发，否则视为游戏内触发
+        var ch = global.__bakabotQQ && global.__bakabotQQ.active ? global.__bakabotQQ : null;
+        if (ch) {
+          // QQ 屏蔽：命中即吞掉消息（不执行、不思考）
+          if (cfg.blockQq) { console.log('[QuickCmd] QQ 屏蔽，吞掉消息'); return true; }
+        } else {
+          if (cfg.blockGame) { console.log('[QuickCmd] 游戏屏蔽，吞掉消息'); return true; }
+        }
+
+        var cmd = String(hit.command || '').trim();
+        if (!cmd || !bot) return false;
+
+        // 命令始终发往游戏执行：临时让 QQ 桥接放行（避免非 / 开头的内容被转到 QQ）
+        var savedCh = global.__bakabotQQ;
+        global.__bakabotQQ = null;
+        try { bot.chat(cmd); } catch (e) { console.log('[QuickCmd] 执行失败: ' + e.message); return false; }
+        finally { global.__bakabotQQ = savedCh; }
+
+        console.log('[QuickCmd] 关键词【' + hit.keyword + '】→ 执行 ' + cmd);
+
+        // 回执到触发渠道：游戏内回执可关闭，QQ 照常
+        var reply = '已执行 ' + cmd;
+        try {
+          if (ch) {
+            if (typeof global.__bakabotQQOut === 'function') global.__bakabotQQOut(reply, ch);
+          } else if (!cfg.suppressGameReply) {
+            require('./utils/chat').sendToOwner(bot, reply);
+          }
+        } catch (e) {}
+        return true;
+      } catch (e) { return false; }
+    }
+
+    // 包装 handleMessage：命中关键词直接执行命令，不进 AI
+    if (typeof handleMessage === 'function') {
+      var __origHandleMessage = handleMessage;
+      handleMessage = async function (username, message) {
+        if (__runQuickCommand(username, message)) return;
+        return __origHandleMessage.call(this, username, message);
+      };
+    }
+  } catch(e) {}
+})();
+// ===== END Bakabot 命令提示词补丁 =====
+";
+        return patchCode + content;
+    }
+
+    private string PatchQQBridgeV2(string content)
+    {
+        // 先剥离旧版 QQ 桥接补丁（与初版共用标记），Repatch 时保证重新注入最新版
+        content = Regex.Replace(content,
+            @"\r?\n?// ===== (?:Bakabot|ARCbot) QQ 桥接补丁 __(?:bakabot|arcbot)_qq_bridge__ =====[\s\S]*?// ===== END (?:Bakabot|ARCbot) QQ 桥接补丁 =====\r?\n?", "");
+
+        if (content.Contains("__bakabot_qq_bridge__"))
+            return content;
+
+        var patchCode = @"
+// ===== Bakabot QQ 桥接补丁 __bakabot_qq_bridge__ =====
+(function(){
+  try {
+    if (global.__bakabotQQBridgePatched) return;
+    global.__bakabotQQBridgePatched = true;
+
+    // 当前会话通道：{ active, qq, groupId, player }；游戏内消息到来时清空切回游戏
+    global.__bakabotQQ = null;
+    // 当前指令的回复通道兜底：处理期间即使被杂项事件误切通道，回复仍发回 QQ
+    global.__bakabotQQReply = null;
+    global.__bakabotQQBot = null;
+    global.__bakabotQQReady = false;
+    // 按 QQ 号分开记会话历史（每人一份，最多 10 条）
+    global.__bakabotQQHist = {};
+
+    function __qqOut(text, ch) {
+      try {
+        ch = ch || global.__bakabotQQ;
+        console.log('[QQ-OUT] ' + JSON.stringify({
+          type: 'msg',
+          qq: (ch && ch.qq) || '',
+          groupId: (ch && ch.groupId) || '',
+          text: String(text == null ? '' : text)
+        }));
+      } catch(e) {}
+    }
+    // 暴露给其他补丁（如命令提示词）发送 QQ 回复用
+    global.__bakabotQQOut = __qqOut;
+
+    // ── 拦截控制台输入：QQCMD JSON 行 → QQ 指令管道（绝不 bot.chat 发公屏）──
+    var __origCreateInterface = require('readline').createInterface;
+    require('readline').createInterface = function(opts) {
+      var __rl = __origCreateInterface.apply(this, arguments);
+      try {
+        var __origOn = __rl.on.bind(__rl);
+        __rl.on = function(event, listener) {
+          if (event === 'line') {
+            var __origListener = listener;
+            listener = function(line) {
+              var t = String(line || '').trim();
+              if (t.indexOf('QQCMD ') === 0) { __handleQQCmd(t); return; }
+              return __origListener.apply(this, arguments);
+            };
+          }
+          return __origOn(event, listener);
+        };
+      } catch(e) {}
+      return __rl;
+    };
+
+    function __handleQQCmd(line) {
+      var msg = null;
+      try { msg = JSON.parse(line.slice('QQCMD '.length)); } catch(e) {}
+      if (!msg || !msg.text) return;
+      var qq = String(msg.qq || '');
+      var groupId = msg.groupId ? String(msg.groupId) : '';
+      var player = String(msg.player || '').trim();
+      if (!qq) return;
+      global.__bakabotQQ = { active: true, qq: qq, groupId: groupId, player: player || null };
+      // stop 类指令顺带清掉该 QQ 的会话历史（基座同时会清全局历史）
+      if (String(msg.text).trim() === 'stop') global.__bakabotQQHist[qq] = [];
+      __deliverQQ(String(msg.text), player || qq);
+    }
+
+    // ── 直接送入基座统一处理链（handleMessage 为主人判定 + LLM 规划）──
+    function __deliverQQ(text, speaker) {
+      try {
+        var bot = global.__bakabotQQBot;
+        if (!bot || !bot.entity) { __qqOut('机器人尚未登录游戏，暂时无法执行指令，请稍后再试。'); return; }
+        if (!global.__bakabotQQReady) { __qqOut('机器人正在准备中，请稍后再试。'); return; }
+        __wrapQqLlm();
+        // 说话人切换为 QQ 绑定玩家（或 QQ 号），handleMessage 的主人检查据此放行；
+        // 保持到下一条件指令（QQ 或游戏内），与聊天触发补丁的“服务对象切换”一致
+        process.env.MC_OWNER_NAME = speaker;
+        console.log('[QQ] 收到指令来自 ' + speaker + ': ' + text);
+        // 兜底记录本次指令的回复通道，防止处理期间被系统消息等杂项事件切走
+        global.__bakabotQQReply = global.__bakabotQQ;
+        var __p = handleMessage(speaker, text);
+        if (__p && typeof __p.catch === 'function') __p.catch(function(e){ console.log('[QQ] 指令处理异常: ' + (e && e.message)); });
+      } catch(e) {
+        console.log('[QQ] 指令处理失败: ' + (e && e.message));
+      }
+    }
+
+    // ── 源头拦截：所有回复/行动消息最终都走 utils/chat 的 sendToOwner，
+    //    在模块出口直接替换（不依赖 createBot 包装是否生效）──
+    try {
+      var __chatUtils = require('./utils/chat');
+      var __origSTO = __chatUtils.sendToOwner;
+      __chatUtils.sendToOwner = function(bot, message) {
+        var s = String(message == null ? '' : message);
+        var ch = global.__bakabotQQ && global.__bakabotQQ.active
+          ? global.__bakabotQQ
+          : (global.__bakabotQQReply || null);
+        if (ch && ch.active) {
+          if (s.indexOf('/tell ') === 0 || s.indexOf('/msg ') === 0) {
+            var parts = s.split(' ');
+            if (parts.length > 2) { parts.splice(0, 2); var txt = parts.join(' ').trim(); if (txt) __qqOut(txt, ch); }
+            return;
+          }
+          if (s.charAt(0) !== '/') { __qqOut(s, ch); return; }
+        }
+        return __origSTO.apply(this, arguments);
+      };
+    } catch(e) {}
+
+    // ── 把基座全局 chatHistory 的写入按当前通道分流（QQ → 各自历史，游戏 → 全局）──
+    function __installQQHistoryHook(history) {
+      if (!history || history.__bakabotQQHistHook) return;
+      try {
+        Object.defineProperty(history, '__bakabotQQHistHook', { value: true, configurable: true });
+        var __origPush = history.push;
+        history.push = function() {
+          var ch = global.__bakabotQQ;
+          if (ch && ch.active) {
+            var arr = global.__bakabotQQHist[ch.qq] = global.__bakabotQQHist[ch.qq] || [];
+            var n = Array.prototype.push.apply(arr, arguments);
+            if (arr.length > 10) arr.shift();
+            return n;
+          }
+          return __origPush.apply(this, arguments);
+        };
+      } catch(e) {}
+    }
+
+    // ── LLM 上下文：当前对话对象（QQ 用户）+ 未绑定提示 + 按 QQ 换历史 ──
+    function __wrapQqLlm() {
+      try {
+        var __llm = require('./services/LLMService');
+        if (!__llm || typeof __llm.generatePlan !== 'function' || __llm.__bakabotQQGenPatched) return;
+        __llm.__bakabotQQGenPatched = true;
+        var __origGen = __llm.generatePlan;
+        __llm.generatePlan = function(sysPrompt, history, userPrompt) {
+          try {
+            var ch = global.__bakabotQQ;
+            if (ch && ch.active) {
+              __installQQHistoryHook(history);
+              var hist = global.__bakabotQQHist[ch.qq] = global.__bakabotQQHist[ch.qq] || [];
+              if (ch.player) {
+                sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（QQ 用户）\n当前指令来自 QQ 用户「' + ch.player + '」（已绑定游戏 ID）。对方话语中的「我」等称呼均指「' + ch.player + '」；所有需要指定玩家的动作（TeleportRequest 的 target、FollowPlayer 的 player_name、DropItemAction 的 target_player 等）必须填写「' + ch.player + '」。';
+              } else {
+                sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（QQ 用户，未绑定）\n当前指令来自未绑定游戏 ID 的 QQ 用户。若指令需要指定玩家才能执行（如传送、跟随、丢物品给玩家），请直接回复：你还没有绑定游戏玩家，无法执行该指令。不要编造玩家名。';
+              }
+              sysPrompt = String(sysPrompt) + '\n\n# QQ 回复规则\n你的回复会通过 QQ 发送给对方。除非用户明确要求“在游戏内说话/发消息”，否则不要使用 Command 动作在游戏内发聊天消息；直接放在回复里即可。';
+              return __origGen.call(this, sysPrompt, hist, userPrompt);
+            }
+          } catch(e) {}
+          return __origGen.call(this, sysPrompt, history, userPrompt);
+        };
+      } catch(e) {}
+    }
+
+    // ── 包装 createBot：记录 bot、监听 spawn 就绪、输出分流、游戏消息切回游戏通道 ──
+    var __mf = require('mineflayer');
+    if (!__mf.__bakabotQQCreatePatched) {
+      __mf.__bakabotQQCreatePatched = true;
+      var __origCreateBot = __mf.createBot;
+      __mf.createBot = function() {
+        var __bot = __origCreateBot.apply(this, arguments);
+        global.__bakabotQQBot = __bot;
+        try { __bot.once('spawn', function(){ global.__bakabotQQReady = true; }); } catch(e) {}
+
+        // 输出分流：QQ 通道中，发给玩家的回复（/tell /msg）与普通聊天播报 → [QQ-OUT]；开头命令仍进游戏
+        try {
+          var __origChat = __bot.chat.bind(__bot);
+          __bot.chat = function(message) {
+            var s = String(message == null ? '' : message);
+            var ch = global.__bakabotQQ && global.__bakabotQQ.active
+              ? global.__bakabotQQ
+              : (global.__bakabotQQReply || null);
+            if (ch && ch.active) {
+              if (s.indexOf('/tell ') === 0 || s.indexOf('/msg ') === 0) {
+                var parts = s.split(' ');
+                if (parts.length > 2) { parts.splice(0, 2); var txt = parts.join(' ').trim(); if (txt) __qqOut(txt); }
+                return;
+              }
+              if (s.charAt(0) !== '/') { __qqOut(s); return; }
+            }
+            return __origChat(s);
+          };
+        } catch(e) {}
+
+        // 游戏内聊天/私信事件到达 → 会话通道切回游戏
+        try {
+          var __origEmit = __bot.emit;
+          __bot.emit = function(eventName) {
+            var ch = global.__bakabotQQ;
+            if (ch && ch.active && (eventName === 'chat' || eventName === 'messagestr')) {
+              var args = Array.prototype.slice.call(arguments, 1);
+              var isSelf = false;
+              var isCommand = false;
+              if (eventName === 'chat') {
+                // 公屏聊天：别人发言算游戏指令；机器人自己的回显不算
+                var who = args[0];
+                isSelf = who && __bot.username && String(who).toLowerCase() === String(__bot.username).toLowerCase();
+                isCommand = !isSelf && !!who;
+              } else {
+                var s = String(args[0] || '');
+                // 系统消息（进出游戏等）不是指令
+                if (!/(?:joined the game|left the game|加入游戏|退出游戏)/.test(s)) {
+                  if (/whispers to you:|悄悄地对你说/.test(s)) {
+                    isCommand = true;
+                  } else {
+                    var m = s.match(/^\[([a-zA-Z0-9_]+)\s*(?:[\u2190-\u21FF\u2794-\u27BE]|->|~)\s*[^\]]*\]/);
+                    if (m) {
+                      isSelf = __bot.username && String(m[1]).toLowerCase() === String(__bot.username).toLowerCase();
+                      isCommand = !isSelf;
+                    }
+                  }
+                }
+              }
+              if (isCommand) {
+                // 真正的游戏指令到来：切回游戏通道，同时清掉 QQ 回复兜底
+                global.__bakabotQQ = null;
+                global.__bakabotQQReply = null;
+              }
+            }
+            return __origEmit.apply(__bot, arguments);
+          };
+        } catch(e) {}
+        return __bot;
+      };
+    }
+  } catch(e) {}
+})();
+// ===== END Bakabot QQ 桥接补丁 =====
+";
+        return patchCode + content;
     }
 
     private string PatchCreateBotOptions(string content)

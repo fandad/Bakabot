@@ -84,8 +84,21 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _viaProxyAccountStatusText = string.Empty;
 
+    // ─── NapCat QQ 协议端 ───
+    [ObservableProperty]
+    private bool _isNapCatDownloaded;
+
+    [ObservableProperty]
+    private bool _isDownloadingNapCat = false;
+
+    [ObservableProperty]
+    private double _napCatProgress = 0;
+
+    [ObservableProperty]
+    private string _napCatStatusText = string.Empty;
+
     // ─── 关于 ───
-    public string AppVersion => "2.2.0";
+    public string AppVersion => "2.3.0";
     public string DotNetVersion => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
     public string AppDataPath => PathHelper.RootDir;
 
@@ -184,6 +197,8 @@ public partial class SettingsViewModel : ObservableObject
         IsCustomBaseAgentImported = File.Exists(PathHelper.CustomBaseAgentZipPath);
         IsViaProxyDownloaded = _downloadService.IsViaProxyDownloaded();
         IsJavaAvailable = JavaHelper.IsJavaAvailable(JavaPath);
+        IsNapCatDownloaded = _downloadService.IsNapCatDownloaded();
+        NapCatStatusText = IsNapCatDownloaded ? "NapCat 已下载" : "NapCat 未下载";
 
         DownloadStatusText = IsNodeInstalled ? "Node.js 运行时已就绪" : "未安装 Node.js 运行时";
         BaseAgentStatusText = IsBaseAgentDownloaded ? "基础包已下载" : "基础包未下载";
@@ -199,10 +214,11 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task DownloadAllAsync()
     {
-        if (IsDownloading || IsDownloadingViaProxy) return;
+        if (IsDownloading || IsDownloadingViaProxy || IsDownloadingNapCat) return;
 
         await DownloadNodeAsync();
         await DownloadViaProxyAsync();
+        await DownloadNapCatAsync();
         RefreshStatus();
     }
 
@@ -347,6 +363,45 @@ public partial class SettingsViewModel : ObservableObject
         finally
         {
             IsDownloadingViaProxy = false;
+        }
+    }
+
+    /// <summary>下载 NapCat QQ 协议端（与一键下载联动）</summary>
+    [RelayCommand]
+    private async Task DownloadNapCatAsync()
+    {
+        if (IsDownloadingNapCat) return;
+        IsDownloadingNapCat = true;
+        NapCatProgress = 0;
+        NapCatStatusText = "正在获取最新版本信息...";
+
+        try
+        {
+            var progress = new Progress<(long downloaded, long total)>(p =>
+            {
+                if (p.total > 0)
+                {
+                    NapCatProgress = (double)p.downloaded / p.total * 100;
+                    NapCatStatusText = $"正在下载 NapCat... {p.downloaded / 1024 / 1024}MB / {p.total / 1024 / 1024}MB ({NapCatProgress:F1}%)";
+                }
+                else
+                {
+                    NapCatStatusText = $"正在下载 NapCat... {p.downloaded / 1024 / 1024}MB";
+                }
+            });
+
+            await _downloadService.DownloadNapCatAsync(progress);
+
+            IsNapCatDownloaded = true;
+            NapCatStatusText = "NapCat 下载完成";
+        }
+        catch (Exception ex)
+        {
+            NapCatStatusText = $"NapCat 下载失败: {ex.Message}";
+        }
+        finally
+        {
+            IsDownloadingNapCat = false;
         }
     }
 

@@ -94,22 +94,24 @@ public partial class ConsoleViewModel : ObservableObject
 
         pm.OutputReceived += (_, entry) =>
         {
-            _dispatcher.Invoke(() =>
+            // 用 BeginInvoke 异步投递：读取线程不会被 UI 卡顿阻塞，
+            // 避免 UI 忙（如清屏海量移除、模态对话框）时 stdout 管道被写满导致机器人进程停摆
+            _dispatcher.BeginInvoke(() =>
             {
                 if (!_logCache.ContainsKey(instanceName))
                     _logCache[instanceName] = new ObservableCollection<ConsoleEntry>();
 
                 _logCache[instanceName].Add(entry);
 
-                // 移除 5000 行限制，允许用户滚动查看所有日志
-                // while (_logCache[instanceName].Count > 5000)
-                //     _logCache[instanceName].RemoveAt(0);
+                // 保留行数上限，避免日志无限积累导致清屏/滚动卡顿
+                while (_logCache[instanceName].Count > 5000)
+                    _logCache[instanceName].RemoveAt(0);
             });
         };
 
         pm.ProcessExited += (_, exitCode) =>
         {
-            _dispatcher.Invoke(() =>
+            _dispatcher.BeginInvoke(() =>
             {
                 _logCache.GetValueOrDefault(instanceName)?.Add(new ConsoleEntry
                 {

@@ -79,6 +79,7 @@
             <!-- ═══ 程序背景 ═══ -->
             <TextBlock Text="程序背景" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="预载背景图 pid:126375185" FontSize="11" Opacity="0.45" Margin="6,0,0,8" />
 
             <Grid Margin="0,0,0,24">
                 <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />

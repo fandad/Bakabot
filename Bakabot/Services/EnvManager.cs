@@ -54,7 +54,11 @@ public class EnvManager
         sb.AppendLine($"CHAT_TRIGGER={instance.ChatTrigger}");
         sb.AppendLine($"TRIGGER_MODE={instance.TriggerMode}");
         sb.AppendLine($"AUTO_DEFEND_ENABLED={BoolToEnv(instance.AutoDefendEnabled)}");
-        sb.AppendLine($"INSTINCT_AUTO_TP_LOGIN={BoolToEnv(instance.InstinctAutoTpLogin)}");
+        sb.AppendLine($"INSTINCT_TP_ACCEPT={BoolToEnv(instance.AutoAcceptTpa)}");
+        sb.AppendLine($"TPA_OWNER_ONLY={BoolToEnv(instance.TpaOwnerOnly)}");
+        sb.AppendLine($"TPA_ACCEPT_TRIGGER={instance.TpaAcceptTrigger}");
+        sb.AppendLine($"INSTINCT_AUTO_LOGIN={BoolToEnv(instance.AutoLogin)}");
+        sb.AppendLine($"INSTINCT_DEATH_BACK={BoolToEnv(instance.DeathBack)}");
         sb.AppendLine($"INSTINCT_AUTO_EAT={BoolToEnv(instance.InstinctAutoEat)}");
         sb.AppendLine($"INSTINCT_AUTO_TOOL={BoolToEnv(instance.InstinctAutoTool)}");
         sb.AppendLine($"INSTINCT_AUTO_DUMP={BoolToEnv(instance.InstinctAutoDump)}");
@@ -127,7 +131,22 @@ public class EnvManager
         if (dict.TryGetValue("CHAT_TRIGGER", out v)) instance.ChatTrigger = v;
         if (dict.TryGetValue("TRIGGER_MODE", out v)) instance.TriggerMode = v;
         if (dict.TryGetValue("AUTO_DEFEND_ENABLED", out v)) instance.AutoDefendEnabled = EnvToBool(v);
-        if (dict.TryGetValue("INSTINCT_AUTO_TP_LOGIN", out v)) instance.InstinctAutoTpLogin = EnvToBool(v);
+        if (dict.TryGetValue("INSTINCT_TP_ACCEPT", out v)) instance.AutoAcceptTpa = EnvToBool(v);
+        if (dict.TryGetValue("TPA_OWNER_ONLY", out v)) instance.TpaOwnerOnly = EnvToBool(v);
+        if (dict.TryGetValue("TPA_ACCEPT_TRIGGER", out v)) instance.TpaAcceptTrigger = v;
+        if (dict.TryGetValue("INSTINCT_AUTO_LOGIN", out v)) instance.AutoLogin = EnvToBool(v);
+        if (dict.TryGetValue("INSTINCT_DEATH_BACK", out v)) instance.DeathBack = EnvToBool(v);
+        // 旧版单一开关 INSTINCT_AUTO_TP_LOGIN 迁移：新字段都没写时按旧值填充三项
+        if (dict.TryGetValue("INSTINCT_AUTO_TP_LOGIN", out v) &&
+            !dict.ContainsKey("INSTINCT_TP_ACCEPT") &&
+            !dict.ContainsKey("INSTINCT_AUTO_LOGIN") &&
+            !dict.ContainsKey("INSTINCT_DEATH_BACK"))
+        {
+            var legacy = EnvToBool(v);
+            instance.AutoAcceptTpa = legacy;
+            instance.AutoLogin = legacy;
+            instance.DeathBack = legacy;
+        }
         if (dict.TryGetValue("INSTINCT_AUTO_EAT", out v)) instance.InstinctAutoEat = EnvToBool(v);
         if (dict.TryGetValue("INSTINCT_AUTO_TOOL", out v)) instance.InstinctAutoTool = EnvToBool(v);
         if (dict.TryGetValue("INSTINCT_AUTO_DUMP", out v)) instance.InstinctAutoDump = EnvToBool(v);

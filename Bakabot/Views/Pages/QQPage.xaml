@@ -1,0 +1,346 @@
+<Page
+    x:Class="Bakabot.Views.Pages.QQPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="QQ 功能"
+    Loaded="Page_Loaded"
+    MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Margin="40,48,40,24">
+
+        <StackPanel MaxWidth="800">
+
+            <!-- ═══════ 标题 ═══════ -->
+            <Grid Margin="0,0,0,32">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <TextBlock
+                    Text="QQ 功能"
+                    FontSize="36"
+                    FontWeight="Bold"
+                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                    Margin="24,16" />
+            </Grid>
+
+            <!-- ═══════ 总开关 ═══════ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock Text="启用 QQ 功能" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="开启后，群里 @机器人（或命中关键词）的消息会按白名单转发给机器人；AI 回复与行动播报会发回群里，游戏内聊天不受影响。" />
+                        </StackPanel>
+
+                        <ui:ToggleSwitch
+                            Grid.Column="1"
+                            IsChecked="{Binding QqEnabled}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ NapCat 协议端 ═══════ -->
+            <TextBlock Text="QQ 协议端（NapCat）" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <Border Margin="16,16,16,0" CornerRadius="8" Padding="12,10"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4" Text="NapCat 是什么？" />
+                                <TextBlock FontSize="12" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="NapCat 是 QQ 的协议端，负责登录 QQ 账号并通过 OneBot 协议与本程序通信。首次使用需要扫码登录，建议使用独立的小号。" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="提示：第三方 QQ 机器人存在一定账号风险，请使用不重要的账号。" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,12" Opacity="0.5" />
+
+                        <!-- 机器人 QQ 号：用于 NapCat 快速登录与配置文件命名 -->
+                        <Grid Margin="16,0,16,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="机器人 QQ 号" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="扫码登录后自动记住；留空则使用默认配置登录任意 QQ" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding BotQQ, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="例如：10001"
+                                Width="200"
+                                FontSize="12"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="NapCat 协议端" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding NapCatStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="登录页提示：首次打开如需输入 Token，填 bakabot；扫码登录后 Token 会自动刷新，新 Token 见上方状态栏的登录页地址。" />
+                                <ProgressBar
+                                    x:Name="NapCatProgressBar"
+                                    Value="{Binding NapCatProgress}"
+                                    Maximum="100"
+                                    Height="4"
+                                    Margin="0,8,0,0"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+
+                            <StackPanel
+                                Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+
+                                <ui:Button
+                                    x:Name="DownloadNapCatBtn"
+                                    Content="下载 NapCat"
+                                    Appearance="Info"
+                                    Padding="14,6"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding DownloadNapCatCommand}" />
+
+                                <ui:Button
+                                    x:Name="StartNapCatBtn"
+                                    Content="启动"
+                                    Appearance="Success"
+                                    Padding="14,6"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding StartNapCatCommand}" />
+
+                                <ui:Button
+                                    x:Name="StopNapCatBtn"
+                                    Content="停止"
+                                    Appearance="Secondary"
+                                    Padding="14,6"
+                                    Margin="0,0,8,0"
+                                    Command="{Binding StopNapCatCommand}" />
+
+                                <ui:Button
+                                    x:Name="OpenWebUIBtn"
+                                    Content="打开登录页"
+                                    Appearance="Secondary"
+                                    Padding="14,6"
+                                    Command="{Binding OpenWebUICommand}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock
+                            FontSize="11"
+                            Opacity="0.55"
+                            TextWrapping="Wrap"
+                            Margin="16,0,16,12"
+                            Text="NapCat 依赖说明：启动前会自动检查缺失的 crypto.dll / ssl.dll，先从包内找，再从本机 QQ 安装目录自动补齐；只有电脑完全没装 QQ 时才需要手动处理。" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ 群消息配置 ═══════ -->
+            <TextBlock Text="群消息配置" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="生效 QQ 群 ID" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="逗号分隔，留空 = 所有群" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding QqGroupIds, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="例如：123456789,987654321"
+                                Width="260"
+                                FontSize="12"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="群内触发关键词" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="逗号分隔；句首命中后剥除关键词再发给机器人。留空 = 仅 @机器人 触发" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding QqTriggerKeywords, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="例如：机器人,小助手"
+                                Width="260"
+                                FontSize="12"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ 白名单 ═══════ -->
+            <TextBlock Text="白名单（全局）" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+
+                        <!-- 允许所有人使用（绕过白名单） -->
+                        <Grid Margin="16,16,16,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="允许所有人使用（绕过白名单）" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="开启后没加白名单的人也能用机器人，按未绑定玩家处理；已加入白名单但被禁用的人仍会被拦截" FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                IsChecked="{Binding QqAllowAll}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,8" Opacity="0.5" />
+
+                        <!-- 添加白名单 -->
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="130" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <ui:TextBox
+                                x:Name="NewQQBox"
+                                Text="{Binding NewQQ, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="QQ 号"
+                                Margin="0,0,8,0"
+                                FontSize="12" />
+
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding NewPlayerName, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="玩家名（可空）"
+                                Margin="0,0,8,0"
+                                FontSize="12" />
+
+                            <ComboBox
+                                Grid.Column="2"
+                                ItemsSource="{Binding BindInstanceOptions}"
+                                SelectedItem="{Binding NewInstanceName, UpdateSourceTrigger=PropertyChanged}"
+                                Margin="0,0,8,0"
+                                FontSize="12"
+                                VerticalAlignment="Center" />
+
+                            <ui:Button
+                                Grid.Column="3"
+                                Content="添加"
+                                Appearance="Primary"
+                                Padding="18,6"
+                                Command="{Binding AddWhitelistCommand}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <!-- 白名单列表 -->
+                        <ItemsControl ItemsSource="{Binding Rows}" Margin="16,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="130" />
+                                            <ColumnDefinition Width="140" />
+                                            <ColumnDefinition Width="140" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Text="{Binding QQDisplay}" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0" />
+
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Text="{Binding PlayerNameDisplay}"
+                                            FontSize="13"
+                                            Opacity="0.7"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,8,0" />
+
+                                        <ComboBox
+                                            Grid.Column="2"
+                                            ItemsSource="{Binding InstanceOptions}"
+                                            SelectedItem="{Binding SelectedInstance, UpdateSourceTrigger=PropertyChanged}"
+                                            Margin="0,0,8,0"
+                                            FontSize="12"
+                                            VerticalAlignment="Center" />
+
+                                        <ui:ToggleSwitch
+                                            Grid.Column="3"
+                                            IsChecked="{Binding Entry.Enabled}"
+                                            Checked="EntryToggle_Checked"
+                                            Unchecked="EntryToggle_Unchecked"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,12,0" />
+
+                                        <ui:Button
+                                            Grid.Column="4"
+                                            Content="删除"
+                                            Appearance="Secondary"
+                                            Padding="12,4"
+                                            FontSize="12"
+                                            Click="RemoveEntry_Click"
+                                            VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock
+                            x:Name="EmptyWhitelistHint"
+                            Text="还没有白名单成员。添加 QQ 号后，群里 @机器人 的消息才会被转发给机器人。"
+                            FontSize="12"
+                            Opacity="0.5"
+                            TextWrapping="Wrap"
+                            Margin="20,0,20,16"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

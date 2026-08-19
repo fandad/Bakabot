@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using Bakabot.Helpers;
@@ -17,6 +18,12 @@ public class DownloadService
     // Node.js 携带版下载地址（Windows x64）——mineflayer 4.37+ 要求 Node ≥ 22
     private const string NodeJsUrl =
         "https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip";
+    private const string NodeJsOfficialBase = "https://nodejs.org/dist/";
+    private const string NodeJsMirrorBase = "https://npmmirror.com/mirrors/node/";
+
+    // GitHub 直连在国内经常被限速/断流（实测仅 30KB/s 且会中断），
+    // 下载统一走“镜像优先、官方兜底”：镜像失败时自动重试官方地址。
+    private const string GhMirrorPrefix = "https://gh-proxy.com/";
 
     // 机器人基础包下载地址
     private const string BaseAgentUrl =
@@ -53,8 +60,73 @@ public class DownloadService
         CancellationToken ct = default)
     {
         Directory.CreateDirectory(PathHelper.ViaProxyDir);
-        var downloadUrl = await ResolveViaProxyDownloadUrlAsync(ct);
-        await DownloadFileAsync(downloadUrl, PathHelper.ViaProxyJarPath, progress, ct);
+        var officialUrl = await ResolveViaProxyDownloadUrlAsync(ct);
+        await DownloadWithFallbackAsync(ToGhMirror(officialUrl), officialUrl,
+            PathHelper.ViaProxyJarPath, progress, ct);
+    }
+
+    /// <summary>NapCat 是否已下载（解压目录存在且非空）</summary>
+    public bool IsNapCatDownloaded()
+    {
+        try
+        {
+            return Directory.Exists(PathHelper.NapCatDir)
+                && Directory.EnumerateFiles(PathHelper.NapCatDir, "*", SearchOption.AllDirectories).Any();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 通过 GitHub API 获取最新版 NapCat 包并下载解压到 napcat/ 目录。
+    /// </summary>
+    public async Task DownloadNapCatAsync(
+        IProgress<(long downloaded, long total)>? progress = null,
+        CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(PathHelper.NapCatDir);
+        var officialUrl = await ResolveNapCatDownloadUrlAsync(ct);
+        await DownloadWithFallbackAsync(ToGhMirror(officialUrl), officialUrl,
+            PathHelper.NapCatZipPath, progress, ct);
+
+        // 解压前清空旧目录，保证版本干净
+        if (Directory.Exists(PathHelper.NapCatDir))
+            Directory.Delete(PathHelper.NapCatDir, true);
+        Directory.CreateDirectory(PathHelper.NapCatDir);
+        ZipFile.ExtractToDirectory(PathHelper.NapCatZipPath, PathHelper.NapCatDir);
+        File.Delete(PathHelper.NapCatZipPath);
+    }
+
+    /// <summary>解析 NapCat 最新版 Windows zip 下载地址（失败则抛异常说明）</summary>
+    private async Task<string> ResolveNapCatDownloadUrlAsync(CancellationToken ct)
+    {
+        try
+        {
+            var json = await _httpClient.GetStringAsync(
+                "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest", ct);
+            using var doc = JsonDocument.Parse(json);
+
+            var zips = new List<string>();
+            foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
+            {
+                var name = asset.GetProperty("name").GetString() ?? "";
+                if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
+                zips.Add(asset.GetProperty("browser_download_url").GetString() ?? "");
+            }
+
+            // 优先 Windows 包，找不到则取任意 zip
+            var win = zips.FirstOrDefault(u =>
+                u.Contains("win", StringComparison.OrdinalIgnoreCase)
+                || u.Contains("windows", StringComparison.OrdinalIgnoreCase));
+            return win ?? zips.FirstOrDefault()
+                ?? throw new InvalidOperationException("NapCat 最新版本中未找到可用的 zip 下载包");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new InvalidOperationException($"获取 NapCat 最新版本失败: {ex.Message}");
+        }
     }
 
     /// <summary>通过 GitHub API 解析最新 ViaProxy 下载地址，失败则回退到固定链接</summary>
@@ -122,8 +194,9 @@ public class DownloadService
 
         var zipPath = Path.Combine(PathHelper.DownloadsDir, "node_runtime.zip");
 
-        // 1. 下载
-        await DownloadFileAsync(NodeJsUrl, zipPath, progress, ct);
+        // 1. 下载（npmmirror 镜像优先，官方源兜底）
+        var nodeMirrorUrl = NodeJsUrl.Replace(NodeJsOfficialBase, NodeJsMirrorBase);
+        await DownloadWithFallbackAsync(nodeMirrorUrl, NodeJsUrl, zipPath, progress, ct);
 
         // 2. 解压（Node.js 官方 zip 包含一层目录，需要找到 node.exe）
         var tempExtract = Path.Combine(PathHelper.DownloadsDir, "node_temp");
@@ -201,4 +274,45 @@ public class DownloadService
             CopyDirectory(dir, destSubDir);
         }
     }
+
+    /// <summary>
+    /// 镜像优先、官方兜底：镜像下载失败（限速/断流/超时）时，
+    /// 自动改用官方地址重试；两个地址相同时直接下载。
+    /// </summary>
+    private async Task DownloadWithFallbackAsync(
+        string mirrorUrl,
+        string officialUrl,
+        string destPath,
+        IProgress<(long downloaded, long total)>? progress = null,
+        CancellationToken ct = default)
+    {
+        if (string.Equals(mirrorUrl, officialUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            await DownloadFileAsync(officialUrl, destPath, progress, ct);
+            return;
+        }
+
+        try
+        {
+            await DownloadFileAsync(mirrorUrl, destPath, progress, ct);
+        }
+        catch
+        {
+            // 镜像失败不阻断：清掉半成品后重试官方地址
+            try { if (File.Exists(destPath)) File.Delete(destPath); } catch { /* ignore */ }
+            try
+            {
+                await DownloadFileAsync(officialUrl, destPath, progress, ct);
+            }
+            catch
+            {
+                // 官方源也失败：删掉半成品，避免留下无法断点续传的垃圾文件
+                try { if (File.Exists(destPath)) File.Delete(destPath); } catch { /* ignore */ }
+                throw;
+            }
+        }
+    }
+
+    /// <summary>把 GitHub 下载地址包一层国内加速镜像前缀</summary>
+    private static string ToGhMirror(string url) => GhMirrorPrefix + url;
 }
