@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-    Title="QQ 功能"
+    Title="QQ 功能 (NapCat)"
     Loaded="Page_Loaded"
     MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
 
@@ -18,7 +18,7 @@
             <Grid Margin="0,0,0,32">
                 <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
                 <TextBlock
-                    Text="QQ 功能"
+                    Text="QQ 功能 (NapCat)"
                     FontSize="36"
                     FontWeight="Bold"
                     Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -194,7 +194,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="群内触发关键词" FontSize="15" FontWeight="SemiBold" />
-                                <TextBlock Text="逗号分隔；句首命中后剥除关键词再发给机器人。留空 = 仅 @机器人 触发" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                                <TextBlock Text="逗号分隔；句首命中后剥除关键词再发给机器人；@机器人 始终有效。留空 = 仅 @机器人 触发" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
                             </StackPanel>
                             <ui:TextBox
                                 Grid.Column="1"

@@ -119,6 +119,10 @@ public partial class CreateInstanceViewModel : ObservableObject
     [ObservableProperty]
     private bool _forbidMining = false;
 
+    /// <summary>进服问候语：进服时是否发送“主人好，底层框架已启动，等待指令！”</summary>
+    [ObservableProperty]
+    private bool _startupGreeting = true;
+
     [ObservableProperty]
     private string _aiStylePrompt = "你说话要像一个活泼可爱的猫娘，结尾喜欢带上\"喵~\"。";
 
@@ -183,6 +187,7 @@ public partial class CreateInstanceViewModel : ObservableObject
         AutoAcceptResourcePack = instance.AutoAcceptResourcePack;
         SuppressActionChat = instance.SuppressActionChat;
         ForbidMining = instance.ForbidMining;
+        StartupGreeting = instance.StartupGreeting;
         AiStylePrompt = instance.AiStylePrompt;
     }
 
@@ -223,6 +228,7 @@ public partial class CreateInstanceViewModel : ObservableObject
         AutoAcceptResourcePack = true;
         SuppressActionChat = false;
         ForbidMining = false;
+        StartupGreeting = true;
         AiStylePrompt = "你说话要像一个活泼可爱的猫娘，结尾喜欢带上\"喵~\"。";
         ErrorMessage = string.Empty;
         HasError = false;
@@ -297,6 +303,7 @@ public partial class CreateInstanceViewModel : ObservableObject
             AutoAcceptResourcePack = AutoAcceptResourcePack,
             SuppressActionChat = SuppressActionChat,
             ForbidMining = ForbidMining,
+            StartupGreeting = StartupGreeting,
             DebugMode = DebugMode,
             AiStylePrompt = AiStylePrompt
         };

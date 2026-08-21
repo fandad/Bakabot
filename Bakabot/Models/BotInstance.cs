@@ -124,6 +124,10 @@ public partial class BotInstance : ObservableObject
     [ObservableProperty]
     private bool _forbidMining = false;
 
+    /// <summary>进服问候语：进服时是否发送“主人好，底层框架已启动，等待指令！”</summary>
+    [ObservableProperty]
+    private bool _startupGreeting = true;
+
     [ObservableProperty]
     private string _aiStylePrompt = "��˵��Ҫ��һ�����ÿɰ���è���βϲ������\"��~\"��";
 
@@ -165,6 +169,7 @@ public partial class BotInstance : ObservableObject
             AutoAcceptResourcePack = AutoAcceptResourcePack,
             SuppressActionChat = SuppressActionChat,
             ForbidMining = ForbidMining,
+            StartupGreeting = StartupGreeting,
             AiStylePrompt = AiStylePrompt
         };
     }

@@ -87,20 +87,19 @@ public class QQService
         var stripped = Regex.Replace(text, @"\[CQ:at[^\]]*\]", string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(stripped)) return;
 
-        // 触发词：配置了关键词则必须句首命中并剥除；未配置关键词时要求消息以 @ 开头
+        // 触发判定：@机器人 始终有效；配置了关键词时，句首命中关键词也算触发并剥除
         var keywords = SplitCsv(_settingsService.Settings.QQTriggerKeywords);
-        var matched = false;
+        var triggered = wasAt;
         foreach (var kw in keywords)
         {
             if (stripped.StartsWith(kw, StringComparison.OrdinalIgnoreCase))
             {
                 stripped = stripped.Substring(kw.Length).Trim();
-                matched = true;
+                triggered = true;
                 break;
             }
         }
-        if (keywords.Count > 0 && !matched) return;
-        if (keywords.Count == 0 && !wasAt) return;
+        if (!triggered) return;
         if (string.IsNullOrWhiteSpace(stripped)) return;
 
         // 白名单拦截：明确加入且被禁用的用户始终拦截；

@@ -48,9 +48,14 @@ public partial class App : Application
         Services.GetRequiredService<QQService>().Initialize();
         var napCatService = Services.GetRequiredService<NapCatService>();
         napCatService.Initialize();
+        var oneBotService = Services.GetRequiredService<OneBot11ServerService>();
+        oneBotService.Initialize();
 
-        // 设置里开着 QQ 桥接且 NapCat 已下载时，随启动器自动拉起（失败不阻塞主界面）
-        if (settings.QQEnabled && napCatService.IsAvailable)
+        // 设置里开着 OneBot 反向接入时随启动器自动拉起；
+        // 否则 QQ 桥接开着且 NapCat 已下载时才自动拉起 NapCat（失败均不阻塞主界面）
+        if (settings.OneBotEnabled)
+            _ = StartOneBotSafelyAsync(oneBotService);
+        else if (settings.QQEnabled && napCatService.IsAvailable)
             _ = StartNapCatSafelyAsync(napCatService);
 
         // 应用背景图（旧版内置预设图已移除，历史 pack:// 路径回退为无背景）
@@ -118,6 +123,18 @@ public partial class App : Application
         }
     }
 
+    private static async Task StartOneBotSafelyAsync(OneBot11ServerService oneBotService)
+    {
+        try
+        {
+            await oneBotService.StartAsync();
+        }
+        catch
+        {
+            // 自动启动失败时状态文本已由服务更新，不打断用户操作
+        }
+    }
+
     private static void ConfigureServices(IServiceCollection services)
     {
         // ─── 单例服务 ───
@@ -131,6 +148,7 @@ public partial class App : Application
         services.AddSingleton<UpdateService>();
         services.AddSingleton<QQService>();
         services.AddSingleton<NapCatService>();
+        services.AddSingleton<OneBot11ServerService>();
 
         // ─── ViewModels ───
         services.AddSingleton<MainWindowViewModel>();
@@ -142,6 +160,7 @@ public partial class App : Application
         services.AddSingleton<AppearanceViewModel>();
         services.AddSingleton<QQViewModel>();
         services.AddSingleton<CommandPromptViewModel>();
+        services.AddSingleton<OneBotViewModel>();
 
         // ─── Pages（注册到 DI 以便 PageService 解析） ───
         services.AddTransient<HomePage>();
@@ -154,6 +173,7 @@ public partial class App : Application
         services.AddSingleton<SettingsPage>();
         services.AddTransient<QQPage>();
         services.AddTransient<CommandPromptPage>();
+        services.AddTransient<OneBotPage>();
 
         // ─── 窗口 ───
         services.AddSingleton<MainWindow>();
@@ -171,6 +191,8 @@ public partial class App : Application
             }
             // 停止 NapCat 协议端
             Services.GetRequiredService<NapCatService>().Dispose();
+            // 停止外部 OneBot11 反向接入
+            Services.GetRequiredService<OneBot11ServerService>().Dispose();
         }
 
         base.OnExit(e);

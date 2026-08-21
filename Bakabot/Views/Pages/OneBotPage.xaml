@@ -1,0 +1,208 @@
+<Page
+    x:Class="Bakabot.Views.Pages.OneBotPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="OneBot 接入"
+    Loaded="Page_Loaded"
+    MaxHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+    <ScrollViewer
+        VerticalScrollBarVisibility="Auto"
+        HorizontalScrollBarVisibility="Disabled"
+        Margin="40,48,40,24">
+
+        <StackPanel MaxWidth="800">
+
+            <!-- ═══════ 标题 ═══════ -->
+            <Grid Margin="0,0,0,32">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <StackPanel Orientation="Horizontal" Margin="24,16">
+                    <TextBlock
+                        Text="OneBot 接入"
+                        FontSize="36"
+                        FontWeight="Bold"
+                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock
+                        Text="贡献者:薯条甜不辣!"
+                        FontSize="12"
+                        Opacity="0.6"
+                        VerticalAlignment="Bottom"
+                        Margin="12,0,0,7" />
+                </StackPanel>
+            </Grid>
+
+            <!-- ═══════ 总开关 ═══════ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock Text="启用 OneBot 反向接入" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="开启后启动固定端口 6700 的反向 WebSocket 服务端，llbot、Lagrange 等协议端可作为客户端接入。群里 @机器人（或命中关键词）的消息复用现有 QQ 白名单与转发逻辑，AI 回复与行动播报照常发回。" />
+                        </StackPanel>
+
+                        <ui:ToggleSwitch
+                            Grid.Column="1"
+                            IsChecked="{Binding OneBotEnabled}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ 服务端配置 ═══════ -->
+            <TextBlock Text="服务端配置" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="接入地址" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="外部协议端反向 WS 客户端需要填写的地址" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding ListenAddress, Mode=OneWay}"
+                                IsReadOnly="True"
+                                FontFamily="Cascadia Code, Consolas, Courier New"
+                                FontSize="13"
+                                Width="240"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="监听端口" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="固定默认 6700，一般不用改；修改后自动重启接入" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding PortText, UpdateSourceTrigger=LostFocus}"
+                                Width="120"
+                                FontSize="12"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <Grid Margin="16,16,16,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="鉴权 Token（可选）" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="留空 = 不校验；填写后客户端需通过 Authorization: Bearer 或 ?access_token= 携带相同值，否则连接会被拒绝" FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <ui:TextBox
+                                Grid.Column="1"
+                                Text="{Binding Token, UpdateSourceTrigger=LostFocus}"
+                                PlaceholderText="留空 = 不校验"
+                                Width="200"
+                                FontSize="12"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ 运行状态 ═══════ -->
+            <TextBlock Text="运行状态" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock Text="{Binding StatusText}" FontSize="13" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ClientCount, StringFormat=已连接外部客户端：{0}}" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                            <TextBlock FontSize="11" Opacity="0.55" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Text="提示：与 NapCat 互斥运行，后启动的一方会顶掉先启动的一方；需保证“QQ 功能 (NapCat)”页的总开关处于开启状态消息才会流转。" />
+                        </StackPanel>
+
+                        <StackPanel
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+
+                            <ui:Button
+                                x:Name="StartBtn"
+                                Content="启动"
+                                Appearance="Success"
+                                Padding="14,6"
+                                Margin="0,0,8,0"
+                                Command="{Binding StartCommand}" />
+
+                            <ui:Button
+                                x:Name="StopBtn"
+                                Content="停止"
+                                Appearance="Secondary"
+                                Padding="14,6"
+                                Command="{Binding StopCommand}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ 使用说明 ═══════ -->
+            <TextBlock Text="外部协议端怎么接" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel Margin="16">
+                        <Border CornerRadius="8" Padding="12,10"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4" Text="llbot" />
+                                <TextBlock FontSize="12" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="在 llbot 的 OneBot11 配置里新增一个反向 WebSocket 客户端，地址填上面的接入地址（如 ws://127.0.0.1:6700），消息格式选 string（CQ 码），Token 与上方填的一致（留空则不用填）。" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="0,12" Opacity="0.5" />
+
+                        <Border CornerRadius="8" Padding="12,10"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4" Text="Lagrange" />
+                                <TextBlock FontSize="12" Opacity="0.7" TextWrapping="Wrap"
+                                           Text="同理，在 Lagrange 的 OneBot 配置里加反向 WebSocket 客户端，地址与消息格式同上。接入成功后本页状态会显示已连接的客户端数量。" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,12,0,0"
+                                   Text="说明：目前只处理群消息，私聊暂不接入；消息格式必须为 string（CQ 码）才能正确识别 @机器人和关键词。只转发通过白名单/允许所有人规则放行的内容，未绑定游戏玩家的命令会提示未绑定。" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

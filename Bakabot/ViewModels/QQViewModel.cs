@@ -8,7 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 namespace Bakabot.ViewModels;
 
 /// <summary>
-/// QQ 功能页：总开关、群配置、NapCat 下载状态、全局白名单管理。
+/// QQ 功能（NapCat）页：总开关、群配置、NapCat 下载状态、全局白名单管理。
 /// 白名单行由 WhitelistRow 包装，提供实例下拉选项与保存回调。
 /// </summary>
 public partial class QQViewModel : ObservableObject

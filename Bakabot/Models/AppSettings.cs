@@ -38,6 +38,14 @@ public class AppSettings
     /// <summary>群内触发关键词，逗号分隔；留空 = 仅 @ 机器人触发</summary>
     public string QQTriggerKeywords { get; set; } = string.Empty;
 
+    // --- OneBot11 反向 WS 接入设置（llbot / Lagrange 等外部协议端）---
+    /// <summary>是否启用外部 OneBot11 反向 WebSocket 接入（与 NapCat 互斥）</summary>
+    public bool OneBotEnabled { get; set; } = false;
+    /// <summary>反向 WebSocket 监听端口（固定默认 6700）</summary>
+    public int OneBotPort { get; set; } = 6700;
+    /// <summary>可选鉴权 Token（留空 = 不校验；客户端需通过 Authorization Bearer 或 access_token 携带）</summary>
+    public string OneBotToken { get; set; } = string.Empty;
+
     // --- 命令提示词设置（全局）---
     /// <summary>是否启用命令提示词（纯关键词模式）</summary>
     public bool QQQuickCommandsEnabled { get; set; } = false;

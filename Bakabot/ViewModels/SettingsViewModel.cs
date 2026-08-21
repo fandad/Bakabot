@@ -98,7 +98,7 @@ public partial class SettingsViewModel : ObservableObject
     private string _napCatStatusText = string.Empty;
 
     // ─── 关于 ───
-    public string AppVersion => "2.3.0";
+    public string AppVersion => "2.4.0";
     public string DotNetVersion => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
     public string AppDataPath => PathHelper.RootDir;
 

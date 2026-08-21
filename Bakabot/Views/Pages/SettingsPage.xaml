@@ -165,7 +165,7 @@
                                 <TextBlock Text="NapCat 协议端" FontSize="15" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding NapCatStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
                                 <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
-                                           Text="NapCat 是 QQ 协议端，用于 QQ 桥接功能；下载后到「QQ 功能」页扫码登录。" />
+                                           Text="NapCat 是 QQ 协议端，用于 QQ 桥接功能；下载后到「QQ 功能 (NapCat)」页扫码登录。" />
                                 <ProgressBar
                                     x:Name="NapCatProgressBar"
                                     Value="{Binding NapCatProgress}"

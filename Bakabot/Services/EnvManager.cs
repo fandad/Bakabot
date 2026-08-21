@@ -62,6 +62,7 @@ public class EnvManager
         sb.AppendLine($"INSTINCT_AUTO_EAT={BoolToEnv(instance.InstinctAutoEat)}");
         sb.AppendLine($"INSTINCT_AUTO_TOOL={BoolToEnv(instance.InstinctAutoTool)}");
         sb.AppendLine($"INSTINCT_AUTO_DUMP={BoolToEnv(instance.InstinctAutoDump)}");
+        sb.AppendLine($"INSTINCT_STARTUP_GREETING={BoolToEnv(instance.StartupGreeting)}");
         sb.AppendLine($"DEBUG_MODE={BoolToEnv(instance.DebugMode)}");
         sb.AppendLine($"AUTO_ACCEPT_RESOURCE_PACK={BoolToEnv(instance.AutoAcceptResourcePack)}");
         sb.AppendLine($"SUPPRESS_ACTION_CHAT={BoolToEnv(instance.SuppressActionChat)}");
@@ -150,6 +151,7 @@ public class EnvManager
         if (dict.TryGetValue("INSTINCT_AUTO_EAT", out v)) instance.InstinctAutoEat = EnvToBool(v);
         if (dict.TryGetValue("INSTINCT_AUTO_TOOL", out v)) instance.InstinctAutoTool = EnvToBool(v);
         if (dict.TryGetValue("INSTINCT_AUTO_DUMP", out v)) instance.InstinctAutoDump = EnvToBool(v);
+        if (dict.TryGetValue("INSTINCT_STARTUP_GREETING", out v)) instance.StartupGreeting = EnvToBool(v);
         if (dict.TryGetValue("DEBUG_MODE", out v)) instance.DebugMode = EnvToBool(v);
         if (dict.TryGetValue("AUTO_ACCEPT_RESOURCE_PACK", out v)) instance.AutoAcceptResourcePack = EnvToBool(v);
         if (dict.TryGetValue("SUPPRESS_ACTION_CHAT", out v)) instance.SuppressActionChat = EnvToBool(v);

@@ -64,9 +64,13 @@
                     Icon="{ui:SymbolIcon Sparkle24}"
                     TargetPageType="{x:Type pages:ExperiencePage}" />
                 <ui:NavigationViewItem
-                    Content="QQ 功能"
+                    Content="QQ 功能 (NapCat)"
                     Icon="{ui:SymbolIcon Chat24}"
                     TargetPageType="{x:Type pages:QQPage}" />
+                <ui:NavigationViewItem
+                    Content="OneBot 接入"
+                    Icon="{ui:SymbolIcon PlugConnected24}"
+                    TargetPageType="{x:Type pages:OneBotPage}" />
                 <ui:NavigationViewItem
                     Content="命令提示词"
                     Icon="{ui:SymbolIcon Keyboard24}"

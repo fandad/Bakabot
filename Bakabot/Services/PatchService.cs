@@ -339,6 +339,7 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchQQBridgeV2(content);
         content = PatchTpSplitMount(content);
         content = PatchQuickCommands(content);
+        content = PatchStartupGreeting(content);
         content = PatchCreateBotOptions(content);
 
         if (content != original)
@@ -390,6 +391,8 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchQQBridgeV2(content);
         content = PatchTpSplitMount(content);
         content = PatchQuickCommands(content);
+        content = PatchStartupGreeting(content);
+        content = PatchCreateBotOptions(content);
 
         File.WriteAllText(indexJs, content, Encoding.UTF8);
 
@@ -779,6 +782,23 @@ module.exports = StrictAutoTeleportLogin;
             arrowRe2);
 
         return content;
+    }
+
+    /// <summary>
+    /// 进服问候语开关补丁（幂等）：INSTINCT_STARTUP_GREETING=false 时不再发送
+    /// “主人好，底层框架已启动，等待指令！”，默认开启。
+    /// </summary>
+    private static string PatchStartupGreeting(string content)
+    {
+        if (content.Contains("__bakabot_greeting_toggle__"))
+            return content;
+
+        const string original = "sendToOwner(bot, '主人好，底层框架已启动，等待指令！');";
+        if (!content.Contains(original))
+            return content;
+
+        return content.Replace(original,
+            "if (process.env.INSTINCT_STARTUP_GREETING !== 'false') sendToOwner(bot, '主人好，底层框架已启动，等待指令！'); // __bakabot_greeting_toggle__");
     }
 
     /// <summary>
@@ -1413,16 +1433,16 @@ module.exports = StrictAutoTeleportLogin;
                 isCommand = !isSelf && !!who;
               } else {
                 var s = String(args[0] || '');
-                // 系统消息（进出游戏等）不是指令
-                if (!/(?:joined the game|left the game|加入游戏|退出游戏)/.test(s)) {
-                  if (/whispers to you:|悄悄地对你说/.test(s)) {
-                    isCommand = true;
-                  } else {
-                    var m = s.match(/^\[([a-zA-Z0-9_]+)\s*(?:[\u2190-\u21FF\u2794-\u27BE]|->|~)\s*[^\]]*\]/);
-                    if (m) {
-                      isSelf = __bot.username && String(m[1]).toLowerCase() === String(__bot.username).toLowerCase();
-                      isCommand = !isSelf;
-                    }
+                // 只把“玩家发来的私信”当作游戏指令切回游戏通道；
+                // 系统/行动反馈等普通 messagestr（传送反馈、公告等）不再切走 QQ 回复通道，
+                // 避免 QQ 指令处理中途被服务器消息打断后，回复发到游戏私聊
+                if (/whispers to you:|悄悄地对你说/.test(s)) {
+                  isCommand = true;
+                } else {
+                  var m = s.match(/^\[([a-zA-Z0-9_]+)\s*(?:[\u2190-\u21FF\u2794-\u27BE]|->|~)\s*[^\]]*\]/);
+                  if (m) {
+                    isSelf = __bot.username && String(m[1]).toLowerCase() === String(__bot.username).toLowerCase();
+                    isCommand = !isSelf;
                   }
                 }
               }

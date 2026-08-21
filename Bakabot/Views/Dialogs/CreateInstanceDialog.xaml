@@ -356,6 +356,13 @@
                             </StackPanel>
                         </DockPanel>
                         <DockPanel Margin="0,0,0,16">
+                            <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding StartupGreeting}" VerticalAlignment="Center" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="进服问候语" FontSize="14" FontWeight="Medium" />
+                                <TextBlock Text="INSTINCT_STARTUP_GREETING：进服时是否发送“主人好，底层框架已启动，等待指令！”" FontSize="11" Opacity="0.5" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                        <DockPanel Margin="0,0,0,16">
                             <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding DebugMode}" VerticalAlignment="Center" />
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="调试模式" FontSize="14" FontWeight="Medium" />

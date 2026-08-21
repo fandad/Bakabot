@@ -103,7 +103,12 @@ public class NapCatService : IDisposable
 
         if (!IsAvailable)
             throw new InvalidOperationException(
-                "NapCat 尚未下载，请先在「设置」或「QQ 功能」页下载后再启动。");
+                "NapCat 尚未下载，请先在「设置」或「QQ 功能 (NapCat)」页下载后再启动。");
+
+        // 互斥：NapCat 启动时顶掉外部 OneBot11 反向接入（llbot / Lagrange 等）
+        var oneBot = ProtocolServerCoordinator.OneBotServer;
+        if (oneBot != null && oneBot.IsRunning)
+            await oneBot.StopAsync();
 
         var nodeExe = PathHelper.NapCatNodeExePath;
         if (!File.Exists(nodeExe) && File.Exists(PathHelper.NodeExePath))
