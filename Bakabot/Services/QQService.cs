@@ -59,6 +59,12 @@ public class QQService
             var json = line.Substring("[QQ-OUT] ".Length);
             var msg = JsonSerializer.Deserialize<QQOutMessage>(json);
             if (msg == null || string.IsNullOrEmpty(msg.Text)) return;
+
+            // QQ 屏蔽非 AI 回复：开启后只放行 AI 回复（type=ai），行动播报/报错/系统提示全部丢弃
+            if (_settingsService.Settings.QQSuppressNonAI &&
+                !string.Equals(msg.Type, "ai", StringComparison.OrdinalIgnoreCase))
+                return;
+
             QQOutReceived?.Invoke(this, msg);
         }
         catch
@@ -82,14 +88,26 @@ public class QQService
         var groupIds = SplitCsv(_settingsService.Settings.QQGroupIds);
         if (groupIds.Count > 0 && !groupIds.Contains(groupId)) return;
 
-        // 剥除 CQ at 码（@机器人）
-        var wasAt = text.TrimStart().StartsWith("[CQ:at", StringComparison.OrdinalIgnoreCase);
-        var stripped = Regex.Replace(text, @"\[CQ:at[^\]]*\]", string.Empty).Trim();
+        // 触发判定：仅 @机器人 本人（按配置的机器人 QQ 号比对）有效；配置了关键词时，句首命中关键词也算触发并剥除
+        var botQQ = (_settingsService.Settings.QQBotNumber ?? string.Empty).Trim();
+        var stripped = text;
+        var atBot = false;
+        if (!string.IsNullOrEmpty(botQQ))
+        {
+            foreach (Match m in Regex.Matches(text, @"\[CQ:at[^\]]*\]", RegexOptions.IgnoreCase))
+            {
+                if (ParseCqAtQQ(m.Value) == botQQ)
+                {
+                    atBot = true;
+                    stripped = stripped.Replace(m.Value, string.Empty); // 只剥 @机器人 的码，@别人的保留给 AI 当上下文
+                }
+            }
+        }
+        stripped = stripped.Trim();
         if (string.IsNullOrWhiteSpace(stripped)) return;
 
-        // 触发判定：@机器人 始终有效；配置了关键词时，句首命中关键词也算触发并剥除
         var keywords = SplitCsv(_settingsService.Settings.QQTriggerKeywords);
-        var triggered = wasAt;
+        var triggered = atBot;
         foreach (var kw in keywords)
         {
             if (stripped.StartsWith(kw, StringComparison.OrdinalIgnoreCase))
@@ -221,6 +239,13 @@ public class QQService
         {
             // 保存失败不阻塞功能
         }
+    }
+
+    /// <summary>从 CQ at 码中提取 qq 字段（[CQ:at,qq=123456] → 123456；@all 返回 "all"）</summary>
+    private static string ParseCqAtQQ(string atCode)
+    {
+        var m = Regex.Match(atCode, @"(?:^|,)\s*qq=([^,\]]+)", RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups[1].Value.Trim() : string.Empty;
     }
 
     private static List<string> SplitCsv(string? value) =>

@@ -38,12 +38,36 @@
                         <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                             <TextBlock Text="启用 QQ 功能" FontSize="15" FontWeight="SemiBold" />
                             <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
-                                       Text="开启后，群里 @机器人（或命中关键词）的消息会按白名单转发给机器人；AI 回复与行动播报会发回群里，游戏内聊天不受影响。" />
+                                       Text="开启后，群里仅 @机器人本人（按下方 QQ 号匹配）或命中关键词的消息会按白名单转发给机器人；AI 回复会发回群里，游戏内聊天不受影响。" />
                         </StackPanel>
 
                         <ui:ToggleSwitch
                             Grid.Column="1"
                             IsChecked="{Binding QqEnabled}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ═══════ QQ 回复筛选 ═══════ -->
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <Grid Margin="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                            <TextBlock Text="QQ 只回 AI 消息" FontSize="15" FontWeight="SemiBold" />
+                            <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="开启后，QQ 只收到 AI 的回复；行动播报、报错和系统提示（如“正在准备中”）全部屏蔽，游戏内聊天不受影响。" />
+                        </StackPanel>
+
+                        <ui:ToggleSwitch
+                            Grid.Column="1"
+                            IsChecked="{Binding QqSuppressNonAI}"
                             VerticalAlignment="Center" />
                     </Grid>
                 </Border>
@@ -194,7 +218,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="群内触发关键词" FontSize="15" FontWeight="SemiBold" />
-                                <TextBlock Text="逗号分隔；句首命中后剥除关键词再发给机器人；@机器人 始终有效。留空 = 仅 @机器人 触发" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
+                                <TextBlock Text="逗号分隔；句首命中后剥除关键词再发给机器人；仅 @机器人本人（按上方 QQ 号匹配）触发。留空 = 仅 @机器人本人触发" FontSize="12" Opacity="0.6" Margin="0,4,0,0" />
                             </StackPanel>
                             <ui:TextBox
                                 Grid.Column="1"

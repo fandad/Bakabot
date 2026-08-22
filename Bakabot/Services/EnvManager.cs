@@ -67,6 +67,7 @@ public class EnvManager
         sb.AppendLine($"AUTO_ACCEPT_RESOURCE_PACK={BoolToEnv(instance.AutoAcceptResourcePack)}");
         sb.AppendLine($"SUPPRESS_ACTION_CHAT={BoolToEnv(instance.SuppressActionChat)}");
         sb.AppendLine($"FORBID_MINING={BoolToEnv(instance.ForbidMining)}");
+        sb.AppendLine($"BERSERK_COOLDOWN_SECONDS={instance.BerserkCooldownSeconds}");
 
         File.WriteAllText(envPath, sb.ToString(), Encoding.UTF8);
     }
@@ -156,6 +157,7 @@ public class EnvManager
         if (dict.TryGetValue("AUTO_ACCEPT_RESOURCE_PACK", out v)) instance.AutoAcceptResourcePack = EnvToBool(v);
         if (dict.TryGetValue("SUPPRESS_ACTION_CHAT", out v)) instance.SuppressActionChat = EnvToBool(v);
         if (dict.TryGetValue("FORBID_MINING", out v)) instance.ForbidMining = EnvToBool(v);
+        if (dict.TryGetValue("BERSERK_COOLDOWN_SECONDS", out v) && int.TryParse(v, out var berserkSec)) instance.BerserkCooldownSeconds = berserkSec;
 
         return instance;
     }

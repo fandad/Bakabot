@@ -119,6 +119,10 @@ public partial class CreateInstanceViewModel : ObservableObject
     [ObservableProperty]
     private bool _forbidMining = false;
 
+    /// <summary>狂暴清障最小间隔（秒），0=不限制</summary>
+    [ObservableProperty]
+    private int _berserkCooldownSeconds = 15;
+
     /// <summary>进服问候语：进服时是否发送“主人好，底层框架已启动，等待指令！”</summary>
     [ObservableProperty]
     private bool _startupGreeting = true;
@@ -187,6 +191,7 @@ public partial class CreateInstanceViewModel : ObservableObject
         AutoAcceptResourcePack = instance.AutoAcceptResourcePack;
         SuppressActionChat = instance.SuppressActionChat;
         ForbidMining = instance.ForbidMining;
+        BerserkCooldownSeconds = instance.BerserkCooldownSeconds;
         StartupGreeting = instance.StartupGreeting;
         AiStylePrompt = instance.AiStylePrompt;
     }
@@ -228,6 +233,7 @@ public partial class CreateInstanceViewModel : ObservableObject
         AutoAcceptResourcePack = true;
         SuppressActionChat = false;
         ForbidMining = false;
+        BerserkCooldownSeconds = 15;
         StartupGreeting = true;
         AiStylePrompt = "你说话要像一个活泼可爱的猫娘，结尾喜欢带上\"喵~\"。";
         ErrorMessage = string.Empty;
@@ -303,6 +309,7 @@ public partial class CreateInstanceViewModel : ObservableObject
             AutoAcceptResourcePack = AutoAcceptResourcePack,
             SuppressActionChat = SuppressActionChat,
             ForbidMining = ForbidMining,
+            BerserkCooldownSeconds = BerserkCooldownSeconds,
             StartupGreeting = StartupGreeting,
             DebugMode = DebugMode,
             AiStylePrompt = AiStylePrompt

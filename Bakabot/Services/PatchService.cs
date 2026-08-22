@@ -690,7 +690,11 @@ module.exports = StrictAutoTeleportLogin;
                 sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（重要）\n当前正在与你对话的玩家是「' + sp + '」。对方话语中的“我”等称呼均指「' + sp + '」；所有需要指定玩家的动作（TeleportRequest 的 target、FollowPlayer 的 player_name 等）必须填写「' + sp + '」。';
               }
             } catch(e) {}
-            return __origGen.call(this, sysPrompt, history, userPrompt);
+            return Promise.resolve(__origGen.call(this, sysPrompt, history, userPrompt)).then(function(r) {
+            // AI 回复已生成：标记下一条 QQ 输出为 AI 消息（启动器据此做“只回 AI”筛选）
+            global.__bakabotQQAIMsg = true;
+            return r;
+          });
           };
         }
       } catch(e) {}
@@ -928,6 +932,7 @@ module.exports = StrictAutoTeleportLogin;
     global.__bakabotQQ = null;
     global.__bakabotQQBot = null;
     global.__bakabotQQReady = false;
+    global.__bakabotQQAIMsg = false;
 
     function __qqOut(type, text) {
       try { console.log('[QQ-OUT] ' + JSON.stringify({ type: type, text: String(text || '') })); } catch(e) {}
@@ -961,6 +966,7 @@ module.exports = StrictAutoTeleportLogin;
       var qq = String(msg.qq || '');
       var player = String(msg.player || '').trim();
       if (qq) global.__bakabotQQ = { active: true, qq: qq, player: player || null };
+      global.__bakabotQQAIMsg = false;
       __deliverQQ(msg.text, player || qq);
     }
 
@@ -1000,7 +1006,11 @@ module.exports = StrictAutoTeleportLogin;
               }
             }
           } catch(e) {}
-          return __origGen.call(this, sysPrompt, history, userPrompt);
+          return Promise.resolve(__origGen.call(this, sysPrompt, history, userPrompt)).then(function(r) {
+            // AI 回复已生成：标记下一条 QQ 输出为 AI 消息（启动器据此做“只回 AI”筛选）
+            global.__bakabotQQAIMsg = true;
+            return r;
+          });
         };
       } catch(e) {}
     }
@@ -1022,12 +1032,13 @@ module.exports = StrictAutoTeleportLogin;
             var s = String(message == null ? '' : message);
             var qq = global.__bakabotQQ;
             if (qq && qq.active) {
+              var __ai = !!global.__bakabotQQAIMsg; global.__bakabotQQAIMsg = false;
               if (s.indexOf('/tell ') === 0 || s.indexOf('/msg ') === 0) {
                 var parts = s.split(' ');
-                if (parts.length > 2) { parts.splice(0, 2); var txt = parts.join(' ').trim(); if (txt) __qqOut('msg', txt); }
+                if (parts.length > 2) { parts.splice(0, 2); var txt = parts.join(' ').trim(); if (txt) __qqOut(__ai ? 'ai' : 'msg', txt); }
                 return;
               }
-              if (s.charAt(0) !== '/') { __qqOut('msg', s); return; }
+              if (s.charAt(0) !== '/') { __qqOut(__ai ? 'ai' : 'msg', s); return; }
             }
             return __origChat(s);
           };
@@ -1247,14 +1258,16 @@ module.exports = StrictAutoTeleportLogin;
     global.__bakabotQQReply = null;
     global.__bakabotQQBot = null;
     global.__bakabotQQReady = false;
+    global.__bakabotQQAIMsg = false;
     // 按 QQ 号分开记会话历史（每人一份，最多 10 条）
     global.__bakabotQQHist = {};
 
     function __qqOut(text, ch) {
       try {
         ch = ch || global.__bakabotQQ;
+        var __ai = !!global.__bakabotQQAIMsg; global.__bakabotQQAIMsg = false;
         console.log('[QQ-OUT] ' + JSON.stringify({
-          type: 'msg',
+          type: __ai ? 'ai' : 'msg',
           qq: (ch && ch.qq) || '',
           groupId: (ch && ch.groupId) || '',
           text: String(text == null ? '' : text)
@@ -1296,6 +1309,7 @@ module.exports = StrictAutoTeleportLogin;
       global.__bakabotQQ = { active: true, qq: qq, groupId: groupId, player: player || null };
       // stop 类指令顺带清掉该 QQ 的会话历史（基座同时会清全局历史）
       if (String(msg.text).trim() === 'stop') global.__bakabotQQHist[qq] = [];
+      global.__bakabotQQAIMsg = false;
       __deliverQQ(String(msg.text), player || qq);
     }
 
@@ -1379,10 +1393,17 @@ module.exports = StrictAutoTeleportLogin;
                 sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（QQ 用户，未绑定）\n当前指令来自未绑定游戏 ID 的 QQ 用户。若指令需要指定玩家才能执行（如传送、跟随、丢物品给玩家），请直接回复：你还没有绑定游戏玩家，无法执行该指令。不要编造玩家名。';
               }
               sysPrompt = String(sysPrompt) + '\n\n# QQ 回复规则\n你的回复会通过 QQ 发送给对方。除非用户明确要求“在游戏内说话/发消息”，否则不要使用 Command 动作在游戏内发聊天消息；直接放在回复里即可。';
-              return __origGen.call(this, sysPrompt, hist, userPrompt);
+              return Promise.resolve(__origGen.call(this, sysPrompt, hist, userPrompt)).then(function(r) {
+                global.__bakabotQQAIMsg = true;
+                return r;
+              });
             }
           } catch(e) {}
-          return __origGen.call(this, sysPrompt, history, userPrompt);
+          return Promise.resolve(__origGen.call(this, sysPrompt, history, userPrompt)).then(function(r) {
+            // AI 回复已生成：标记下一条 QQ 输出为 AI 消息（启动器据此做“只回 AI”筛选）
+            global.__bakabotQQAIMsg = true;
+            return r;
+          });
         };
       } catch(e) {}
     }

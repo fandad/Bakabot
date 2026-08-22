@@ -1,15 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<!-- 图形子系统：双击启动不弹控制台窗口；stdio 模式由 MCP 客户端用管道拉起，标准输入输出走管道，无需控制台 -->
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net8.0-windows</TargetFramework>
+		<!-- 框架依赖构建时允许滚动到已安装的更高版本运行库（开发/开源构建不需要精确安装 .NET 8；自包含发布保持自带运行库不受影响） -->
+		<RollForward Condition="'$(SelfContained)' != 'true'">LatestMajor</RollForward>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
 		<ApplicationIcon>Assets\icon.ico</ApplicationIcon>
 		<AssemblyName>Bakabot</AssemblyName>
 		<RootNamespace>Bakabot</RootNamespace>
-		<Version>2.4.0</Version>
+		<Version>2.5.0</Version>
 		<!-- 1. 强制将所有 C++ 原生库（包括 WPF底层和 WebView2）全部塞进 EXE 中 -->
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 
@@ -29,6 +32,13 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.*" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.*" />
 		<PackageReference Include="DnsClient" Version="1.8.*" />
+		<PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+		<PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- MCP 服务（stdio/HTTP）内置于启动器，需要 ASP.NET Core 框架 -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
 
 	<ItemGroup>

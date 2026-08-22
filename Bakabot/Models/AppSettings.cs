@@ -38,6 +38,24 @@ public class AppSettings
     /// <summary>群内触发关键词，逗号分隔；留空 = 仅 @ 机器人触发</summary>
     public string QQTriggerKeywords { get; set; } = string.Empty;
 
+    /// <summary>QQ 屏蔽非 AI 回复：开启后 QQ 只收到 AI 回复，行动播报/报错/系统提示全部屏蔽</summary>
+    public bool QQSuppressNonAI { get; set; } = false;
+
+    /// <summary>MCP 本地接口：开启后仅本机可访问，供外部 AI 通过 MCP 调用机器人</summary>
+    public bool MCPEnabled { get; set; } = false;
+
+    /// <summary>MCP 本地接口访问 Token（首次启用自动生成）</summary>
+    public string MCPToken { get; set; } = string.Empty;
+
+    /// <summary>MCP 云端 HTTP 访问：启动器进程内托管 /mcp（Streamable HTTP）</summary>
+    public bool MCPHttpEnabled { get; set; } = false;
+
+    /// <summary>MCP 云端 HTTP 访问的 API Key（首次启用自动生成）</summary>
+    public string MCPApiKey { get; set; } = string.Empty;
+
+    /// <summary>MCP 云端 HTTP 访问的 IP 白名单（逗号分隔，支持网段；留空 = 有 Key 即可）</summary>
+    public string MCPIpWhitelist { get; set; } = string.Empty;
+
     // --- OneBot11 反向 WS 接入设置（llbot / Lagrange 等外部协议端）---
     /// <summary>是否启用外部 OneBot11 反向 WebSocket 接入（与 NapCat 互斥）</summary>
     public bool OneBotEnabled { get; set; } = false;

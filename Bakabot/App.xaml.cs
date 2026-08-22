@@ -17,11 +17,24 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // --mcp-stdio：MCP 客户端以 Bakabot.exe --mcp-stdio 拉起时不显示界面，
+        // 直接以标准 MCP 协议连接本机正在运行的主启动器。
+        var isMcpStdio = e.Args.Any(a => string.Equals(a, "--mcp-stdio", StringComparison.OrdinalIgnoreCase));
+
         PathHelper.EnsureDirectories();
 
         var serviceCollection = new ServiceCollection();
         ConfigureServices(serviceCollection);
         Services = serviceCollection.BuildServiceProvider();
+
+        if (isMcpStdio)
+        {
+            var stdioSettingsService = Services.GetRequiredService<SettingsService>();
+            // 不能同步阻塞 UI 线程等待 stdio（会死锁）：先返回启动消息循环，
+            // stdio 循环结束后在 UI 线程上退出。
+            _ = RunStdioAndExitAsync(stdioSettingsService);
+            return;
+        }
 
         // 加载并应用设置
         var settingsService = Services.GetRequiredService<SettingsService>();
@@ -50,6 +63,14 @@ public partial class App : Application
         napCatService.Initialize();
         var oneBotService = Services.GetRequiredService<OneBot11ServerService>();
         oneBotService.Initialize();
+
+        // MCP 本地接口（仅本机，供外部 AI 通过 MCP 调用机器人）
+        if (settings.MCPEnabled || settings.MCPHttpEnabled)
+            Services.GetRequiredService<LocalApiService>().Start();
+
+        // MCP 云端 HTTP 接口（启动器进程内托管 /mcp）
+        if (settings.MCPHttpEnabled)
+            _ = StartMcpHostSafelyAsync();
 
         // 设置里开着 OneBot 反向接入时随启动器自动拉起；
         // 否则 QQ 桥接开着且 NapCat 已下载时才自动拉起 NapCat（失败均不阻塞主界面）
@@ -135,6 +156,31 @@ public partial class App : Application
         }
     }
 
+    private static async Task StartMcpHostSafelyAsync()
+    {
+        try
+        {
+            await Services.GetRequiredService<McpHostService>().StartAsync();
+        }
+        catch
+        {
+            // 自动启动失败不打断主界面
+        }
+    }
+
+    private static async Task RunStdioAndExitAsync(SettingsService settingsService)
+    {
+        try
+        {
+            var exitCode = await Task.Run(() => McpHostService.RunStdioAsync(settingsService));
+            Application.Current.Shutdown(exitCode);
+        }
+        catch
+        {
+            Application.Current.Shutdown(1);
+        }
+    }
+
     private static void ConfigureServices(IServiceCollection services)
     {
         // ─── 单例服务 ───
@@ -149,6 +195,8 @@ public partial class App : Application
         services.AddSingleton<QQService>();
         services.AddSingleton<NapCatService>();
         services.AddSingleton<OneBot11ServerService>();
+        services.AddSingleton<LocalApiService>();
+        services.AddSingleton<McpHostService>();
 
         // ─── ViewModels ───
         services.AddSingleton<MainWindowViewModel>();
@@ -193,6 +241,10 @@ public partial class App : Application
             Services.GetRequiredService<NapCatService>().Dispose();
             // 停止外部 OneBot11 反向接入
             Services.GetRequiredService<OneBot11ServerService>().Dispose();
+            // 停止 MCP 本地接口
+            Services.GetRequiredService<LocalApiService>().Dispose();
+            // 停止 MCP 云端接口
+            try { Services.GetRequiredService<McpHostService>().StopAsync().GetAwaiter().GetResult(); } catch { }
         }
 
         base.OnExit(e);

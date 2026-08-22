@@ -51,6 +51,10 @@ public partial class QQViewModel : ObservableObject
     [ObservableProperty]
     private bool _qqAllowAll;
 
+    /// <summary>QQ 只回 AI 消息：开启后屏蔽行动播报/报错/系统提示，只发 AI 回复</summary>
+    [ObservableProperty]
+    private bool _qqSuppressNonAI;
+
     [ObservableProperty]
     private bool _isNapCatDownloaded;
 
@@ -87,6 +91,7 @@ public partial class QQViewModel : ObservableObject
         _qqAllowAll = settings.QQAllowAll;
         _qqGroupIds = settings.QQGroupIds ?? string.Empty;
         _qqTriggerKeywords = settings.QQTriggerKeywords ?? string.Empty;
+        _qqSuppressNonAI = settings.QQSuppressNonAI;
 
         _instanceManager.Instances.CollectionChanged += (_, _) => RefreshInstanceOptions();
         _qqService.WhitelistChanged += (_, _) => RebuildRows();
@@ -125,6 +130,11 @@ public partial class QQViewModel : ObservableObject
     partial void OnQqTriggerKeywordsChanged(string value)
     {
         _settingsService.UpdateSettings(s => s.QQTriggerKeywords = value);
+    }
+
+    partial void OnQqSuppressNonAIChanged(bool value)
+    {
+        _settingsService.UpdateSettings(s => s.QQSuppressNonAI = value);
     }
 
     private void RefreshInstanceOptions()

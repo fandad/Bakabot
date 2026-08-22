@@ -230,6 +230,13 @@
                                 VerticalAlignment="Center" />
                         </Grid>
 
+                        <!-- ViaProxy 使用提示（必看） -->
+                        <Border Margin="16,0,16,16" CornerRadius="8" Padding="12,10"
+                                Background="#33E5A13A" BorderBrush="#66E5A13A" BorderThickness="1">
+                            <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="#E5A13A" TextWrapping="Wrap"
+                                       Text="必看：在连接使用了 ViaVersion 的服务器时请一定要在配置正版账号界面选择一个确定版本或关闭 ViaProxy，若服务器与客户端都选择了自动兼容会导致无法进入服务器！" />
+                        </Border>
+
                         <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
 
                         <!-- ViaProxy JAR 下载 -->
@@ -328,6 +335,133 @@
                     </StackPanel>
                 </Border>
             </Grid>
+
+            <!-- ═══ MCP 本地接口 ═══ -->
+            <TextBlock Text="MCP 本地接口" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Margin="0,0,0,24">
+                <Border Style="{StaticResource UnifiedOverlayBorderStyle}" />
+                <Border CornerRadius="12" BorderThickness="1" BorderBrush="Transparent">
+                    <StackPanel>
+                        <!-- 开关 -->
+                        <Grid Margin="16,16,16,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="启用 MCP 本地接口" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="供外部 AI（支持 MCP 的客户端）在本机调用机器人。仅监听 127.0.0.1，需凭 Token 访问。" />
+                            </StackPanel>
+                            <ui:ToggleSwitch
+                                Grid.Column="1"
+                                IsChecked="{Binding McpEnabled}"
+                                VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                        <!-- Token -->
+                        <Grid Margin="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="访问 Token" FontSize="15" FontWeight="SemiBold" />
+                                <ui:TextBox
+                                    Text="{Binding McpToken, Mode=OneWay}"
+                                    FontSize="11"
+                                    IsReadOnly="True"
+                                    Margin="0,6,0,0"
+                                    Width="280"
+                                    HorizontalAlignment="Left" />
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Text="Token 等于机器人的全部权限（挖矿/交易/攻击/说话），只交给可信的 AI 客户端，不要公开。" />
+                            </StackPanel>
+                              <ui:Button
+                                  Grid.Column="1"
+                                  Content="复制"
+                                  Appearance="Secondary"
+                                  Padding="16,6"
+                                  Command="{Binding CopyMcpTokenCommand}"
+                                  VerticalAlignment="Center" />
+                          </Grid>
+
+                          <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                          <!-- 云端 HTTP 访问 -->
+                          <Grid Margin="16,16,16,12">
+                              <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="Auto" />
+                              </Grid.ColumnDefinitions>
+                              <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                  <TextBlock Text="云端 HTTP 访问" FontSize="15" FontWeight="SemiBold" />
+                                  <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
+                                             Text="开启后由启动器直接提供 /mcp 端点（默认端口 8727），供其它机器/云端 AI 调用。开启会自动同时启用本地接口。" />
+                              </StackPanel>
+                              <ui:ToggleSwitch
+                                  Grid.Column="1"
+                                  IsChecked="{Binding McpHttpEnabled}"
+                                  VerticalAlignment="Center" />
+                          </Grid>
+
+                          <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                          <!-- API Key -->
+                          <Grid Margin="16">
+                              <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="Auto" />
+                              </Grid.ColumnDefinitions>
+                              <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                  <TextBlock Text="云端 API Key" FontSize="15" FontWeight="SemiBold" />
+                                  <ui:TextBox
+                                      Text="{Binding McpApiKey, Mode=OneWay}"
+                                      FontSize="11"
+                                      IsReadOnly="True"
+                                      Margin="0,6,0,0"
+                                      Width="280"
+                                      HorizontalAlignment="Left" />
+                                  <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,6,0,0"
+                                             Text="外部客户端通过 Authorization: Bearer 携带；等于机器人全部权限，务必保密。" />
+                              </StackPanel>
+                              <ui:Button
+                                  Grid.Column="1"
+                                  Content="复制"
+                                  Appearance="Secondary"
+                                  Padding="16,6"
+                                  Command="{Binding CopyMcpApiKeyCommand}"
+                                  VerticalAlignment="Center" />
+                          </Grid>
+
+                          <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
+
+                          <!-- IP 白名单 -->
+                          <Grid Margin="16">
+                              <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="Auto" />
+                              </Grid.ColumnDefinitions>
+                              <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                  <TextBlock Text="IP 白名单" FontSize="15" FontWeight="SemiBold" />
+                                  <ui:TextBox
+                                      Text="{Binding McpIpWhitelist, UpdateSourceTrigger=PropertyChanged}"
+                                      FontSize="11"
+                                      Margin="0,6,0,0"
+                                      Width="280"
+                                      HorizontalAlignment="Left"
+                                      PlaceholderText="留空 = 有 Key 即可；如 203.0.113.0/24,198.51.100.5" />
+                                  <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,6,0,0"
+                                             Text="逗号分隔，支持单个 IP 或网段；修改即时生效。公网使用建议配合反代 HTTPS。" />
+                              </StackPanel>
+                          </Grid>
+                      </StackPanel>
+                  </Border>
+              </Grid>
 
             <!-- ═══ 关于 ═══ -->
             <TextBlock Text="关于" FontSize="14" FontWeight="SemiBold" Margin="4,0,0,8"

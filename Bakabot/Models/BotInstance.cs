@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Bakabot.Models;
 
@@ -124,6 +124,10 @@ public partial class BotInstance : ObservableObject
     [ObservableProperty]
     private bool _forbidMining = false;
 
+    /// <summary>狂暴模式最小冷却间隔（秒），0=禁用</summary>
+    [ObservableProperty]
+    private int _berserkCooldownSeconds = 15;
+
     /// <summary>进服问候语：进服时是否发送“主人好，底层框架已启动，等待指令！”</summary>
     [ObservableProperty]
     private bool _startupGreeting = true;
@@ -169,6 +173,7 @@ public partial class BotInstance : ObservableObject
             AutoAcceptResourcePack = AutoAcceptResourcePack,
             SuppressActionChat = SuppressActionChat,
             ForbidMining = ForbidMining,
+            BerserkCooldownSeconds = BerserkCooldownSeconds,
             StartupGreeting = StartupGreeting,
             AiStylePrompt = AiStylePrompt
         };

@@ -15,6 +15,8 @@ public partial class SettingsViewModel : ObservableObject
     private readonly DownloadService _downloadService;
     private readonly SettingsService _settingsService;
     private readonly ViaProxyService _viaProxyService;
+    private readonly LocalApiService _localApiService;
+    private readonly McpHostService _mcpHostService;
 
     // ─── Node.js 运行时 ───
     [ObservableProperty]
@@ -97,17 +99,35 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _napCatStatusText = string.Empty;
 
+    // ─── MCP 本地接口 ───
+    [ObservableProperty]
+    private bool _mcpEnabled;
+
+    [ObservableProperty]
+    private string _mcpToken = string.Empty;
+
+    [ObservableProperty]
+    private bool _mcpHttpEnabled;
+
+    [ObservableProperty]
+    private string _mcpApiKey = string.Empty;
+
+    [ObservableProperty]
+    private string _mcpIpWhitelist = string.Empty;
+
     // ─── 关于 ───
-    public string AppVersion => "2.4.0";
+    public string AppVersion => "2.5.0";
     public string DotNetVersion => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
     public string AppDataPath => PathHelper.RootDir;
 
     public SettingsViewModel(DownloadService downloadService, SettingsService settingsService,
-        ViaProxyService viaProxyService)
+        ViaProxyService viaProxyService, LocalApiService localApiService, McpHostService mcpHostService)
     {
         _downloadService = downloadService;
         _settingsService = settingsService;
         _viaProxyService = viaProxyService;
+        _localApiService = localApiService;
+        _mcpHostService = mcpHostService;
 
         // 从设置服务初始化
         var settings = _settingsService.Settings;
@@ -116,6 +136,11 @@ public partial class SettingsViewModel : ObservableObject
         _disableAfdianPopup = settings.DisableAfdianPopup;
         _enableViaProxy = settings.EnableViaProxy;
         _javaPath = settings.JavaPath;
+        _mcpEnabled = settings.MCPEnabled;
+        _mcpToken = settings.MCPToken ?? string.Empty;
+        _mcpHttpEnabled = settings.MCPHttpEnabled;
+        _mcpApiKey = settings.MCPApiKey ?? string.Empty;
+        _mcpIpWhitelist = settings.MCPIpWhitelist ?? string.Empty;
 
         RefreshStatus();
     }
@@ -318,6 +343,110 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnEnableViaProxyChanged(bool value)
     {
         _settingsService.UpdateSettings(s => s.EnableViaProxy = value);
+    }
+
+    partial void OnMcpEnabledChanged(bool value)
+    {
+        _settingsService.UpdateSettings(s => s.MCPEnabled = value);
+        if (value)
+        {
+            if (string.IsNullOrWhiteSpace(_settingsService.Settings.MCPToken))
+            {
+                var token = Guid.NewGuid().ToString("N");
+                _settingsService.UpdateSettings(s => s.MCPToken = token);
+                McpToken = token;
+            }
+            _localApiService.Start();
+        }
+        else
+        {
+            _localApiService.Stop();
+        }
+    }
+
+    partial void OnMcpTokenChanged(string value)
+    {
+        _settingsService.UpdateSettings(s => s.MCPToken = value.Trim());
+    }
+
+    [RelayCommand]
+    private void CopyMcpToken()
+    {
+        if (string.IsNullOrWhiteSpace(McpToken)) return;
+        try
+        {
+            Clipboard.SetText(McpToken);
+        }
+        catch
+        {
+            // 剪贴板被占用等异常忽略
+        }
+    }
+
+    partial void OnMcpHttpEnabledChanged(bool value)
+    {
+        _settingsService.UpdateSettings(s => s.MCPHttpEnabled = value);
+        if (value)
+        {
+            // 云端访问依赖本地接口：自动一并开启
+            if (!_settingsService.Settings.MCPEnabled)
+            {
+                _settingsService.UpdateSettings(s => s.MCPEnabled = true);
+                McpEnabled = true;
+            }
+            if (string.IsNullOrWhiteSpace(_settingsService.Settings.MCPApiKey))
+            {
+                var apiKey = Guid.NewGuid().ToString("N");
+                _settingsService.UpdateSettings(s => s.MCPApiKey = apiKey);
+                McpApiKey = apiKey;
+            }
+            _ = StartMcpHttpSafelyAsync();
+        }
+        else
+        {
+            _ = _mcpHostService.StopAsync();
+        }
+    }
+
+    partial void OnMcpApiKeyChanged(string value)
+    {
+        _settingsService.UpdateSettings(s => s.MCPApiKey = value.Trim());
+    }
+
+    partial void OnMcpIpWhitelistChanged(string value)
+    {
+        _settingsService.UpdateSettings(s => s.MCPIpWhitelist = value);
+        // 白名单变更即时生效
+        if (_settingsService.Settings.MCPHttpEnabled)
+            _ = _mcpHostService.RestartAsync();
+    }
+
+    [RelayCommand]
+    private void CopyMcpApiKey()
+    {
+        if (string.IsNullOrWhiteSpace(McpApiKey)) return;
+        try
+        {
+            Clipboard.SetText(McpApiKey);
+        }
+        catch
+        {
+            // 剪贴板被占用等异常忽略
+        }
+    }
+
+    private async Task StartMcpHttpSafelyAsync()
+    {
+        try
+        {
+            // 云端模式需要本地接口可用
+            _localApiService.Start();
+            await _mcpHostService.StartAsync();
+        }
+        catch
+        {
+            // 启动失败不打断设置操作
+        }
     }
 
     partial void OnJavaPathChanged(string value)
