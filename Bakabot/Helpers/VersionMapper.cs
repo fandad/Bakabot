@@ -7,13 +7,17 @@ namespace Bakabot.Helpers;
 /// <summary>
 /// Minecraft 版本号映射工具
 /// 支持 2026 年起的新年份命名版本（如 26.1、26.2）
-/// 核心逻辑：26.x 等 mineflayer 不原生支持的新版本，会被映射到 mineflayer 实际支持的版本，
-/// 配合服务器 ViaVersion 等跨版本插件实现连接
+/// 核心逻辑：
+/// - 26.1 / 26.1.2 协议号同为 775（补丁版不改协议），基础包 minecraft-data 已内置 26.1 数据，
+///   因此可直接原生直连，不再需要 ViaProxy / 服务器 ViaVersion；
+/// - 26.2（协议 776）等更新版本在 minecraft-data 数据就绪前仍映射到兼容版本，
+///   配合 ViaProxy / 服务器 ViaVersion 实现连接。
 /// </summary>
 public static class VersionMapper
 {
     /// <summary>
     /// mineflayer 官方支持的版本列表（截至 4.37.x）
+    /// 26.1 / 26.1.2 同协议（775）且数据已内置，一并视为原生支持
     /// 不在此列表中的版本号会导致 mineflayer 直接抛出异常退出
     /// </summary>
     private static readonly HashSet<string> SupportedVersions = new()
@@ -32,7 +36,8 @@ public static class VersionMapper
         "1.19", "1.19.1", "1.19.2", "1.19.3", "1.19.4",
         "1.20", "1.20.1", "1.20.2", "1.20.3", "1.20.4", "1.20.5", "1.20.6",
         "1.21", "1.21.1", "1.21.2", "1.21.3", "1.21.4",
-        "1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.9", "1.21.10", "1.21.11"
+        "1.21.5", "1.21.6", "1.21.7", "1.21.8", "1.21.9", "1.21.10", "1.21.11",
+        "26.1", "26.1.2"
     };
 
     /// <summary>
@@ -55,6 +60,7 @@ public static class VersionMapper
     {
         // 新年份命名版本（2026+，自动映射到兼容版本）
         "26.2",
+        "26.1.2",
         "26.1",
         // mineflayer 原生支持的版本
         "1.21.4",
@@ -149,14 +155,8 @@ public static class VersionMapper
     /// </summary>
     public static string GetVersionDisplayName(string version)
     {
-        if (IsYearVersion(version))
-        {
-            return $"{version} (兼容模式，使用 {DefaultFallbackVersion} 协议)";
-        }
-        if (!IsDirectlySupported(version))
-        {
-            return $"{version} (兼容模式，使用 {DefaultFallbackVersion} 协议)";
-        }
-        return version;
+        // 26.1 / 26.1.2 原生支持，直接显示版本号
+        if (IsDirectlySupported(version)) return version;
+        return $"{version} (兼容模式，使用 {DefaultFallbackVersion} 协议)";
     }
 }

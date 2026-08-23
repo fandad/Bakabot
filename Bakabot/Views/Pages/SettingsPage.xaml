@@ -237,6 +237,13 @@
                                        Text="必看：在连接使用了 ViaVersion 的服务器时请一定要在配置正版账号界面选择一个确定版本或关闭 ViaProxy，若服务器与客户端都选择了自动兼容会导致无法进入服务器！" />
                         </Border>
 
+                        <!-- ViaProxy 第三方登录限制提示 -->
+                        <Border Margin="16,0,16,16" CornerRadius="8" Padding="12,10"
+                                Background="#33E5A13A" BorderBrush="#66E5A13A" BorderThickness="1">
+                            <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="#E5A13A" TextWrapping="Wrap"
+                                       Text="注意：ViaProxy 不支持第三方登录（Yggdrasil）。认证方式为第三方的实例会自动回退为直连模式，此时连接 26.x 服务器需要服务器安装 ViaVersion 插件才能进入，否则会被服务器以“版本过旧”踢出。" />
+                        </Border>
+
                         <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
 
                         <!-- ViaProxy JAR 下载 -->
@@ -353,7 +360,7 @@
                             <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="启用 MCP 本地接口" FontSize="15" FontWeight="SemiBold" />
                                 <TextBlock FontSize="12" Opacity="0.6" TextWrapping="Wrap" Margin="0,4,0,0"
-                                           Text="供外部 AI（支持 MCP 的客户端）在本机调用机器人。仅监听 127.0.0.1，需凭 Token 访问。" />
+                                           Text="供外部 AI（支持 MCP 的客户端）在本机调用机器人（127.0.0.1:8726），仅监听本机，需凭 Token 访问。" />
                             </StackPanel>
                             <ui:ToggleSwitch
                                 Grid.Column="1"

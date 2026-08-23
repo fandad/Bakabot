@@ -60,7 +60,7 @@
                     <TextBlock Style="{StaticResource DocP}" Text="2️⃣ 准备基础包：原作者官网已关闭，「下载基础包」在线功能不可用。请到 QQ 群 1082669385 获取基础包 zip，然后在「设置 → 自定义基础包」里点「导入本地包」并打开「使用自定义」开关。" />
                     <TextBlock Style="{StaticResource DocP}" Text="3️⃣ 创建实例：首页右下角的蓝色 + 按钮 → 填写服务器地址、端口、机器人昵称、登录方式，以及 API 配置（见下方「API 与模型配置」栏目）→ 保存。" />
                     <TextBlock Style="{StaticResource DocP}" Text="4️⃣ 启动：在首页实例卡片上点「▶ 启动」，机器人即进入服务器；在「控制台」页可实时查看日志、给机器人发指令。" />
-                    <TextBlock Style="{StaticResource DocP}" Text="5️⃣ 进 26.x 等新版本服务器：无需服务器装任何插件，只要设置里「启用 ViaProxy」开着（默认开），创建实例时选择 26.1 / 26.2 等版本即可直连。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="5️⃣ 进 26.x 等新版本服务器：26.1 / 26.1.2 已原生直连（无需 ViaProxy、无需服务器装插件）；26.2 等更新版本需设置里「启用 ViaProxy」开着（默认开），创建实例时选择对应版本即可。" />
                 </StackPanel>
             </Expander>
 
@@ -158,8 +158,9 @@
                     <TextBlock Style="{StaticResource DocHeader}" Text="🌐 ViaProxy 与 26.x 服务器直连" />
                 </Expander.Header>
                 <StackPanel Margin="8,4,8,8">
-                    <TextBlock Style="{StaticResource DocP}" Text="• ViaProxy 是 ViaVersion 团队开发的独立协议代理，支持任意 Minecraft 版本之间的协议转换。" />
-                    <TextBlock Style="{StaticResource DocP}" Text="• 开启后（设置 → 启用 ViaProxy），创建实例时选择 26.1、26.2 等新年份命名版本，机器人无需服务器安装 ViaVersion 就能直接进入 26.x 服务器。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 26.1 / 26.1.2：协议号同为 775，基础包已内置协议数据，已原生直连，无需 ViaProxy 也无需服务器安装 ViaVersion。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 26.2 及更新版本：需通过 ViaProxy（设置 → 启用 ViaProxy）或服务器端 ViaVersion 做协议转换；ViaProxy 开启时机器人自动以兼容协议经本地代理进入。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• ViaProxy 是 ViaVersion 团队开发的独立协议代理，支持任意 Minecraft 版本之间的协议转换，作为 26.2 等新版本的兜底方案保留。" />
                     <TextBlock Style="{StaticResource DocP}" Text="• 需要 Java 17+（MC 官方启动器通常已内置）；Java 路径留空会自动检测，也可手动指定。" />
                     <TextBlock Style="{StaticResource DocP}" Text="• 离线服可直接进入；正版验证服需在「设置 → 正版账号」中配置微软账号；第三方登录（Yggdrasil）服自动回退到兼容模式。" />
                     <TextBlock Style="{StaticResource DocP}" Text="• 提示：ViaProxy 登录微软账号时偶发报错属于其连接微软服务的波动，报错即登录失败，多试几次一般即可成功。" />
@@ -195,6 +196,41 @@
                 </StackPanel>
             </Expander>
 
+            <!-- ═══ MCP 接入 · 本地 stdio ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🔌 MCP 接入 · 本地 stdio（AstrBot 等客户端调用）" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• MCP 是外部 AI（AstrBot、Claude Desktop 等支持 MCP 的客户端）调用机器人的标准协议。Bakabot 已内置，目前提供两个工具：list_instances（查看实例状态）、send_instruction（向机器人发指令）。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 适用：客户端与 Bakabot 在同一台电脑。先启动 Bakabot，在「设置 → MCP 本地接口」打开「启用 MCP 本地接口」（Token 自动生成，无需记录），并保持启动器运行。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 在 AstrBot「扩展 → MCP 服务器 → 新增服务器」里，名称随意，服务器配置填（路径换成你机器上 Bakabot.exe 的真实完整路径，必须是 exe 文件本身，不是文件夹）：&#xA;{ &quot;command&quot;: &quot;C:\\Users\\11\\Desktop\\Bakabot_v2.6.0\\Bakabot.exe&quot;, &quot;args&quot;: [&quot;--mcp-stdio&quot;] }" />
+                    <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,10" Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
+                        <TextBlock TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Foreground="#FFFF9500" Text="⚠️ 关键：AstrBot 只允许白名单命令，Bakabot.exe 不在默认名单。需要为 AstrBot 进程设置系统环境变量 ASTRBOT_MCP_STDIO_ALLOWED_COMMANDS=bakabot，然后完全退出并重启 AstrBot（不是刷新网页）。如果还挂了其他 MCP 服务器，变量值要一并写上，例如 node,bakabot。" />
+                    </Border>
+                    <TextBlock Style="{StaticResource DocP}" Text="• 验证：保存后 AstrBot 会拉起 Bakabot 完成握手，状态变为运行中，工具列表出现 list_instances / send_instruction 即成功（不会弹黑窗口）。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 报错对照：command not allowed → 环境变量没设置或 AstrBot 没重启；工具列表为空 / 连不上 8726 → 启动器没运行或「MCP 本地接口」没开；一启动就退出 → 先确认本地接口已开启再试。" />
+                </StackPanel>
+            </Expander>
+
+            <!-- ═══ MCP 接入 · 云端 HTTP ═══ -->
+            <Expander Margin="0,0,0,12">
+                <Expander.Header>
+                    <TextBlock Style="{StaticResource DocHeader}" Text="🔌 MCP 接入 · 云端 HTTP（跨机器 / 免环境变量）" />
+                </Expander.Header>
+                <StackPanel Margin="8,4,8,8">
+                    <TextBlock Style="{StaticResource DocP}" Text="• 适用：客户端与 Bakabot 不在同一台电脑（局域网 / 公网），或不想折腾 stdio 环境变量。走 Streamable HTTP 协议，默认端口 8727。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 准备：在「设置 → MCP 本地接口」打开「启用 MCP 本地接口」和「云端 HTTP 访问」（会自动一并开启本地接口），复制「云端 API Key」备用；启动器保持运行。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• IP 白名单：留空 = 不限制 IP（公网不建议留空）；同机填 127.0.0.1，局域网可填网段如 192.168.1.0/24；跨网段 / 公网要把客户端所在机器或网段的 IP 加进去，否则返回 403。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 网络：同机用 127.0.0.1；局域网填 Bakabot 电脑的局域网 IP（ipconfig 查看）；公网需放行 TCP 8727（路由器端口转发或云服务器安全组）。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• AstrBot 配置（模板选 streamable_http / HTTP），同机示例（跨机器把 url 里的地址换成 Bakabot 电脑的 IP）：&#xA;{ &quot;transport&quot;: &quot;streamable_http&quot;, &quot;url&quot;: &quot;http://127.0.0.1:8727/mcp&quot;, &quot;headers&quot;: { &quot;Authorization&quot;: &quot;Bearer 你的云端APIKey&quot; } }" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 无需设置环境变量，也不用重启 AstrBot，保存后测试握手通过即可。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 验证：状态变运行中、工具列表出现 list_instances / send_instruction；浏览器打开 http://127.0.0.1:8727/healthz 返回 ok 说明服务正常；Bakabot 侧日志在 %APPDATA%\Bakabot\mcp_calls.log。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 报错对照：401 unauthorized → API Key 填错或 Bearer 后缺空格；403 ip not allowed → IP 白名单没放行客户端 IP；连不上 / 超时 → 启动器没运行、端口被防火墙拦或 IP 填错。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• stdio 与 HTTP 可同时开启，互不影响。" />
+                </StackPanel>
+            </Expander>
+
             <!-- ═══ 常见问题 ═══ -->
             <Expander Margin="0,0,0,12">
                 <Expander.Header>
@@ -211,7 +247,7 @@
                     <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
                     <TextBlock Style="{StaticResource DocP}" Text="Q：开了「屏蔽行动公屏播报」后机器人动作失败也没提示？&#xA;A：这是设计如此——开启后除大模型回复外公屏不发任何消息（含失败提示），失败详情可在控制台日志查看。" />
                     <TextBlock Style="{StaticResource DocP}" Margin="0,0,0,12" Text="" />
-                    <TextBlock Style="{StaticResource DocP}" Text="Q：进 26.x 服务器提示版本不支持？&#xA;A：确认设置里「启用 ViaProxy」已打开、ViaProxy.jar 已下载、Java 17+ 可用，然后重建或编辑实例选择 26.x 版本。" />
+                    <TextBlock Style="{StaticResource DocP}" Text="Q：进 26.2 等新版本服务器提示版本不支持？&#xA;A：确认设置里「启用 ViaProxy」已打开、ViaProxy.jar 已下载、Java 17+ 可用，然后重建或编辑实例选择对应版本。26.1 / 26.1.2 已原生直连，无需 ViaProxy。" />
                 </StackPanel>
             </Expander>
 

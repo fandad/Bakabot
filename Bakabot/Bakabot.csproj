@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<!-- 图形子系统：双击启动不弹控制台窗口；stdio 模式由 MCP 客户端用管道拉起，标准输入输出走管道，无需控制台 -->
@@ -12,7 +12,7 @@
 		<ApplicationIcon>Assets\icon.ico</ApplicationIcon>
 		<AssemblyName>Bakabot</AssemblyName>
 		<RootNamespace>Bakabot</RootNamespace>
-		<Version>2.5.0</Version>
+		<Version>2.6.0</Version>
 		<!-- 1. 强制将所有 C++ 原生库（包括 WPF底层和 WebView2）全部塞进 EXE 中 -->
 		<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 
