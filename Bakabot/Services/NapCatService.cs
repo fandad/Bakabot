@@ -38,6 +38,9 @@ public class NapCatService : IDisposable
     private long _echoSeq;
     private string _webUiUrl = $"http://127.0.0.1:{WebUiPort}/webui?token={WebUiToken}";
     private string _statusText = "NapCat 未启动";
+    private bool _qrWaiting;
+    private string _qrCodePath = "";
+    private long _lastQrHintTick;
 
     /// <summary>状态变化事件（进程启停、连接、WebUI 地址等），供 UI 刷新</summary>
     public event EventHandler<NapCatState>? StateChanged;
@@ -169,6 +172,7 @@ public class NapCatService : IDisposable
             if (e.Data == null) return;
             logAction?.Invoke($"[NapCat] {e.Data}");
             TryParseWebUiUrl(e.Data);
+            TryParseLoginHint(e.Data);
             if (e.Data.Contains("WebUi", StringComparison.OrdinalIgnoreCase) &&
                 e.Data.Contains("Url", StringComparison.OrdinalIgnoreCase))
                 readyTcs.TrySetResult(true);
@@ -179,6 +183,7 @@ public class NapCatService : IDisposable
             if (e.Data == null) return;
             logAction?.Invoke($"[NapCat] {e.Data}");
             TryParseWebUiUrl(e.Data);
+            TryParseLoginHint(e.Data);
         };
 
         process.Exited += (_, _) =>
@@ -210,12 +215,12 @@ public class NapCatService : IDisposable
             if (!ready && process.HasExited)
                 UpdateState(running: false, "NapCat 启动失败，进程已退出，请查看日志后重试");
             else
-                UpdateState(running: true, $"NapCat 已启动，登录页: {WebUiUrl}");
+                UpdateState(running: true, _qrWaiting ? GetQrHintText() : $"NapCat 已启动，登录页: {WebUiUrl}");
         }
         catch (OperationCanceledException)
         {
             if (!process.HasExited)
-                UpdateState(running: true, $"NapCat 运行中，登录页: {WebUiUrl}");
+                UpdateState(running: true, _qrWaiting ? GetQrHintText() : $"NapCat 运行中，登录页: {WebUiUrl}");
         }
     }
 
@@ -350,6 +355,11 @@ public class NapCatService : IDisposable
             lock (_sync)
                 _clients.Add(client);
             var localPort = tcp.Client?.LocalEndPoint is IPEndPoint ep ? ep.Port : 0;
+            lock (_sync)
+            {
+                _qrWaiting = false;
+                _qrCodePath = "";
+            }
             UpdateState(IsRunning, $"NapCat 已连接（ws://127.0.0.1:{localPort}）");
 
             await ReadFramesAsync(client, ct);
@@ -612,6 +622,66 @@ public class NapCatService : IDisposable
 
         lock (_sync)
             _webUiUrl = match.Value;
+    }
+
+    /// <summary>
+    /// 监听 NapCat 输出的登录状态：无历史会话进入二维码登录时，把状态栏切为醒目的
+    /// “等待扫码”提示，避免进程看似已启动、QQ 却一直收不到消息的困惑。
+    /// </summary>
+    private void TryParseLoginHint(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return;
+
+        // 进入等待扫码：NapCat 会提示快速登录失败 / 请扫描二维码 / 二维码已保存到路径
+        var waiting = line.Contains("请扫描", StringComparison.OrdinalIgnoreCase)
+            || (line.Contains("快速登录失败", StringComparison.OrdinalIgnoreCase)
+                && line.Contains("二维码", StringComparison.OrdinalIgnoreCase))
+            || line.Contains("二维码已保存", StringComparison.OrdinalIgnoreCase);
+
+        // 登录成功或会话恢复：清除扫码提示（WS 连接建立时也会再次兜底清除）
+        var loggedIn = line.Contains("登录成功", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("login success", StringComparison.OrdinalIgnoreCase);
+
+        if (loggedIn)
+        {
+            lock (_sync)
+            {
+                _qrWaiting = false;
+                _qrCodePath = "";
+            }
+            return;
+        }
+
+        if (!waiting) return;
+
+        var now = Environment.TickCount64;
+        lock (_sync)
+        {
+            if (now - _lastQrHintTick < 1500) return; // 节流，避免连续输出反复刷新状态
+            _lastQrHintTick = now;
+            _qrWaiting = true;
+
+            // 优先取 NapCat 自己提示的二维码图片路径，取不到则用固定缓存路径兜底
+            var pathMatch = Regex.Match(line, @"[A-Za-z]:[^，。\s]*qrcode\.png", RegexOptions.IgnoreCase);
+            if (pathMatch.Success)
+                _qrCodePath = pathMatch.Value;
+            else if (string.IsNullOrEmpty(_qrCodePath))
+            {
+                var fallback = Path.Combine(PathHelper.NapCatWorkDir, "cache", "qrcode.png");
+                _qrCodePath = File.Exists(fallback) ? fallback : "";
+            }
+        }
+        UpdateState(IsRunning, GetQrHintText());
+    }
+
+    private string GetQrHintText()
+    {
+        lock (_sync)
+        {
+            return _qrCodePath.Length > 0
+                ? $"NapCat 等待扫码登录：请点「打开登录页」用手机 QQ 扫码（二维码图片：{_qrCodePath}）"
+                : "NapCat 等待扫码登录：请点「打开登录页」用手机 QQ 扫码";
+        }
     }
 
     /// <summary>组装入口参数：填了机器人 QQ 号时传 -q 走快速登录（本地有该号会话则免扫码）</summary>
