@@ -76,6 +76,11 @@ public partial class QQViewModel : ObservableObject
     [ObservableProperty]
     private string _napCatStatusText = "NapCat 未下载";
 
+    /// <summary>NapCat DLL 完整性检验结果（QQ 页状态栏展示）</summary>
+    [ObservableProperty]
+    private string _dllCheckStatusText =
+        "尚未检验：点击右侧「检验完整性」可主动检查 crypto.dll / ssl.dll 是否就位。";
+
     public QQViewModel(QQService qqService, SettingsService settingsService,
         InstanceManager instanceManager, DownloadService downloadService, NapCatService napCatService)
     {
@@ -235,6 +240,33 @@ public partial class QQViewModel : ObservableObject
         if (!IsNapCatRunning) return;
         NapCatStatusText = "正在停止 NapCat...";
         await _napCatService.StopAsync();
+    }
+
+    /// <summary>
+    /// 完整性检验：先弹确认框，确认后主动检查 wrapper 依赖的 crypto.dll / ssl.dll，
+    /// 缺失时按启动前的兜底逻辑自动补齐，完整结果展示在状态栏。
+    /// </summary>
+    [RelayCommand]
+    private void CheckWrapperIntegrity()
+    {
+        var answer = MessageBox.Show(
+            "将主动检查 NapCat 运行所需的 crypto.dll / ssl.dll 是否完整。\n\n" +
+            "若缺失会自动补齐：先在 NapCat 包内递归查找并复制；包内没有时，再从本机 QQ 安装目录找到后复制过去。" +
+            "只复制、不移动、不会覆盖已有文件。\n\n" +
+            "是否开始检验？",
+            "完整性检验",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes) return;
+
+        try
+        {
+            DllCheckStatusText = _napCatService.CheckWrapperDependencies();
+        }
+        catch (Exception ex)
+        {
+            DllCheckStatusText = $"检验失败：{ex.Message}";
+        }
     }
 
     /// <summary>在浏览器打开 NapCat WebUI（扫码登录/管理配置）</summary>

@@ -204,7 +204,7 @@
                 <StackPanel Margin="8,4,8,8">
                     <TextBlock Style="{StaticResource DocP}" Text="• MCP 是外部 AI（AstrBot、Claude Desktop 等支持 MCP 的客户端）调用机器人的标准协议。Bakabot 已内置，目前提供两个工具：list_instances（查看实例状态）、send_instruction（向机器人发指令）。" />
                     <TextBlock Style="{StaticResource DocP}" Text="• 适用：客户端与 Bakabot 在同一台电脑。先启动 Bakabot，在「设置 → MCP 本地接口」打开「启用 MCP 本地接口」（Token 自动生成，无需记录），并保持启动器运行。" />
-                    <TextBlock Style="{StaticResource DocP}" Text="• 在 AstrBot「扩展 → MCP 服务器 → 新增服务器」里，名称随意，服务器配置填（路径换成你机器上 Bakabot.exe 的真实完整路径，必须是 exe 文件本身，不是文件夹）：&#xA;{ &quot;command&quot;: &quot;C:\\Users\\11\\Desktop\\Bakabot_v2.7.0\\Bakabot.exe&quot;, &quot;args&quot;: [&quot;--mcp-stdio&quot;] }" />
+                    <TextBlock Style="{StaticResource DocP}" Text="• 在 AstrBot「扩展 → MCP 服务器 → 新增服务器」里，名称随意，服务器配置填（路径换成你机器上 Bakabot.exe 的真实完整路径，必须是 exe 文件本身，不是文件夹）：&#xA;{ &quot;command&quot;: &quot;C:\\Users\\11\\Desktop\\Bakabot_v2.7.1\\Bakabot.exe&quot;, &quot;args&quot;: [&quot;--mcp-stdio&quot;] }" />
                     <Border CornerRadius="8" Padding="12,10" Margin="0,0,0,10" Background="#33FF9500" BorderBrush="#FFFF9500" BorderThickness="1.5">
                         <TextBlock TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" Foreground="#FFFF9500" Text="⚠️ 关键：AstrBot 只允许白名单命令，Bakabot.exe 不在默认名单。需要为 AstrBot 进程设置系统环境变量 ASTRBOT_MCP_STDIO_ALLOWED_COMMANDS=bakabot，然后完全退出并重启 AstrBot（不是刷新网页）。如果还挂了其他 MCP 服务器，变量值要一并写上，例如 node,bakabot。" />
                     </Border>

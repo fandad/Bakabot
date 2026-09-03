@@ -115,6 +115,29 @@
 
                         <Border Height="1" Background="{DynamicResource ControlStrokeColorDefaultBrush}" Margin="16,0" Opacity="0.5" />
 
+                        <!-- 完整性检验：NapCat 官方 Windows 包漏打包 crypto.dll / ssl.dll，可主动检查并按启动兜底逻辑补齐 -->
+                        <Border Margin="16,12,16,16" Padding="12,10" CornerRadius="8"
+                                BorderThickness="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock Text="完整性检验（crypto.dll / ssl.dll）" FontSize="13" FontWeight="SemiBold" />
+                                    <TextBlock FontSize="11" Opacity="0.65" TextWrapping="Wrap" Margin="0,4,0,0"
+                                               Text="NapCat 官方部分 Windows 包漏打包 crypto.dll / ssl.dll，缺失会导致启动即报错。点击「检验完整性」会先确认，再主动检查这两个文件是否就位：若缺失，先在 NapCat 包内递归查找并复制补齐；包内没有，再从本机 QQ 安装目录找到后复制（只复制、不移动、不覆盖已有文件）。" />
+                                    <TextBlock FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               Text="{Binding DllCheckStatusText}" />
+                                </StackPanel>
+                                <ui:Button Grid.Column="1" Content="检验完整性" Appearance="Info" Padding="12,6"
+                                           VerticalAlignment="Center"
+                                           Command="{Binding CheckWrapperIntegrityCommand}" />
+                            </Grid>
+                        </Border>
+
                         <Grid Margin="16">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />

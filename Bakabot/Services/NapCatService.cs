@@ -694,45 +694,113 @@ public class NapCatService : IDisposable
     /// <summary>
     /// NapCat v4.18.x 的 Windows.Node 包漏打包 crypto.dll/ssl.dll，
     /// 而 wrapper.node 启动时静态依赖它们（缺失会直接报“找不到指定的模块”）。
-    /// 缺失时按 NapCat 官方启动器同样的方式，从注册表定位本机 QQ 安装目录并补齐。
+    /// 启动前自动调用兜底；QQ 页“完整性检验”也会主动调用并展示完整结果。
+    /// 补齐顺序：先 NapCat 包内递归查找，再从本机 QQ 安装目录查找；
+    /// 找到后 File.Copy 复制（只复制、不移动原文件、不覆盖已存在文件）。
     /// </summary>
+    public string CheckWrapperDependencies(Action<string>? logAction = null)
+    {
+        var napcatDir = PathHelper.NapCatDir;
+        var all = new[] { "crypto.dll", "ssl.dll" };
+        var sb = new StringBuilder();
+
+        bool Exists(string f) => File.Exists(Path.Combine(napcatDir, f));
+
+        var missing = all.Where(f => !Exists(f)).ToList();
+        if (missing.Count == 0)
+        {
+            sb.Append("✓ 完整性正常：crypto.dll 与 ssl.dll 均已存在（")
+              .Append(Path.Combine(napcatDir, "crypto.dll")).Append("、")
+              .Append(Path.Combine(napcatDir, "ssl.dll"))
+              .Append("），无需补齐。");
+            return sb.ToString();
+        }
+
+        sb.Append("检测到缺失：").Append(string.Join("、", missing)).Append("。开始自动补齐：").AppendLine();
+
+        // 1. 先在 NapCat 包内递归找：后续版本可能把依赖放进子目录（如 versions/<ver>/resources/app/）
+        foreach (var file in missing.ToList())
+        {
+            string? found = null;
+            try
+            {
+                found = Directory.EnumerateFiles(napcatDir, file, SearchOption.AllDirectories).FirstOrDefault();
+            }
+            catch
+            {
+                // 目录不可枚举时忽略，继续走 QQ 安装目录兜底
+            }
+            if (found == null) continue;
+            try
+            {
+                File.Copy(found, Path.Combine(napcatDir, file), overwrite: true);
+                sb.Append("· ").Append(file).Append(" 缺失，已从 NapCat 包内找到并复制补齐：").Append(found).AppendLine();
+                logAction?.Invoke($"[NapCat] 已从 NapCat 包内补齐缺失的 {file}（完整性检验）");
+                missing.Remove(file);
+            }
+            catch (Exception ex)
+            {
+                sb.Append("· ").Append(file).Append(" 从 NapCat 包内复制失败：").Append(ex.Message).AppendLine();
+            }
+        }
+
+        // 2. 包内没有时，从本机已安装的 QQ 目录补齐
+        if (missing.Count > 0)
+        {
+            var qqRoot = FindInstalledQQRoot();
+            if (qqRoot == null)
+            {
+                sb.Append("· 未找到本机 QQ 安装目录，无法从 QQ 目录补齐。").AppendLine();
+            }
+            else
+            {
+                foreach (var file in missing.ToList())
+                {
+                    string? found = null;
+                    try
+                    {
+                        found = Directory.EnumerateFiles(qqRoot, file, SearchOption.AllDirectories).FirstOrDefault();
+                    }
+                    catch
+                    {
+                        // 安装目录不可读时忽略
+                    }
+                    if (found == null) continue;
+                    try
+                    {
+                        File.Copy(found, Path.Combine(napcatDir, file), overwrite: true);
+                        sb.Append("· ").Append(file).Append(" 缺失，已从本机 QQ 安装目录复制补齐：").Append(found).AppendLine();
+                        logAction?.Invoke($"[NapCat] 已从 QQ 安装目录补齐缺失的 {file}（完整性检验）");
+                        missing.Remove(file);
+                    }
+                    catch (Exception ex)
+                    {
+                        sb.Append("· ").Append(file).Append(" 从 QQ 安装目录复制失败：").Append(ex.Message).AppendLine();
+                    }
+                }
+            }
+        }
+
+        // 3. 汇总最终结果
+        var stillMissing = all.Where(f => !Exists(f)).ToList();
+        if (stillMissing.Count == 0)
+        {
+            sb.Append("✓ 补齐完成：crypto.dll 与 ssl.dll 现已全部就位，NapCat 可以正常启动。");
+        }
+        else
+        {
+            sb.Append("✗ 仍缺失：").Append(string.Join("、", stillMissing))
+              .Append("。NapCat 包内与本机 QQ 安装目录都没有找到可复制的文件，NapCat 可能无法启动；请检查 NapCat 包是否完整，或安装 QQ 后重试。");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>启动前兜底：自动补齐缺失依赖（无缺失时直接返回，不打扰启动流程）</summary>
     private void EnsureWrapperDependencies(Action<string>? logAction)
     {
         try
         {
-            var missing = new[] { "crypto.dll", "ssl.dll" }
-                .Where(f => !File.Exists(Path.Combine(PathHelper.NapCatDir, f)))
-                .ToList();
-            if (missing.Count == 0) return;
-
-            // 1. 先在 NapCat 包内递归找：后续版本可能把依赖放进子目录（如 versions/<ver>/resources/app/）
-            foreach (var file in missing.ToList())
-            {
-                var nested = Directory.EnumerateFiles(PathHelper.NapCatDir, file, SearchOption.AllDirectories)
-                    .FirstOrDefault();
-                if (nested == null) continue;
-                File.Copy(nested, Path.Combine(PathHelper.NapCatDir, file), overwrite: true);
-                missing.Remove(file);
-                logAction?.Invoke($"[NapCat] 已在 NapCat 包内找到并补齐缺失的 {file}");
-            }
-            if (missing.Count == 0) return;
-
-            // 2. 从本机已安装的 QQ 目录补齐
-            var qqRoot = FindInstalledQQRoot();
-            if (qqRoot == null)
-            {
-                logAction?.Invoke($"[NapCat] 警告：wrapper.node 缺少 {string.Join("/", missing)}，" +
-                                  "且未找到本机 QQ 安装目录，NapCat 可能无法启动");
-                return;
-            }
-
-            foreach (var file in missing)
-            {
-                var src = Directory.EnumerateFiles(qqRoot, file, SearchOption.AllDirectories).FirstOrDefault();
-                if (src == null) continue;
-                File.Copy(src, Path.Combine(PathHelper.NapCatDir, file), overwrite: true);
-                logAction?.Invoke($"[NapCat] 已从 QQ 安装目录补齐缺失的 {file}");
-            }
+            _ = CheckWrapperDependencies(logAction);
         }
         catch (Exception ex)
         {
