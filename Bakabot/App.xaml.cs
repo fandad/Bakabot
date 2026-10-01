@@ -187,6 +187,7 @@ public partial class App : Application
         services.AddSingleton<AuthInterceptor>();
         services.AddSingleton<EnvManager>();
         services.AddSingleton<DownloadService>();
+        services.AddSingleton<AiProviderService>();
         services.AddSingleton<SettingsService>();
         services.AddSingleton<PatchService>();
         services.AddSingleton<ViaProxyService>();

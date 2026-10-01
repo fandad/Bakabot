@@ -26,6 +26,20 @@ public class AppSettings
     /// <summary>自定义 java.exe 路径（留空则自动检测）</summary>
     public string JavaPath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 连接正版验证服务器时，ViaProxy 使用 saves.json 里第几个微软账号登录（0 起）。
+    /// 此前该值被写死为 0，导致配置了多个账号时永远只用第一个，实例里填的用户名完全不起作用。
+    /// </summary>
+    public int ViaProxyAccountIndex { get; set; } = 0;
+
+    // --- AI 配置界面 ---
+    /// <summary>
+    /// 上次在「创建/编辑实例」里选过的 AI 服务商预设 id。
+    /// 新建实例时默认选中它，避免每次都跳回默认厂商。
+    /// （编辑已有实例时不用这个值，而是按该实例已保存的 API URL 反查厂商）
+    /// </summary>
+    public string LastAiProviderId { get; set; } = string.Empty;
+
     // --- QQ 桥接设置 ---
     /// <summary>是否启用 QQ 桥接功能</summary>
     public bool QQEnabled { get; set; } = false;

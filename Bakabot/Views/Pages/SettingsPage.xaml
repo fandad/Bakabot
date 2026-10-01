@@ -264,7 +264,7 @@
                             </StackPanel>
                             <ui:Button
                                 Grid.Column="1"
-                                Content="下载 ViaProxy"
+                                Content="{Binding ViaProxyDownloadButtonText}"
                                 Appearance="Info"
                                 Padding="16,6"
                                 Command="{Binding DownloadViaProxyCommand}"
@@ -311,7 +311,21 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="正版账号（微软账号）" FontSize="15" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding ViaProxyAccountStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding ViaProxyAccountStatusText}" FontSize="12" Opacity="0.7" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <!-- 正版账号选择：决定 ViaProxy 用哪个账号登录正版验证服务器 -->
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <TextBlock Text="登录账号：" FontSize="12" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                    <ComboBox
+                                        ItemsSource="{Binding ViaProxyAccounts}"
+                                        SelectedItem="{Binding SelectedViaProxyAccount, UpdateSourceTrigger=PropertyChanged}"
+                                        DisplayMemberPath="Display"
+                                        MinWidth="180"
+                                        FontSize="12"
+                                        VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="多个正版账号时在此选择用哪个进正版验证服（实例里填的机器人用户名不参与正版验证，改它不会切换登录身份）。修改后需停止并重新启动实例生效。" />
                                 <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"
                                            Text="连接在线模式（正版验证）服务器时，由 ViaProxy 使用此账号登录；离线模式服务器无需配置。" />
                                 <TextBlock FontSize="11" Opacity="0.5" TextWrapping="Wrap" Margin="0,4,0,0"

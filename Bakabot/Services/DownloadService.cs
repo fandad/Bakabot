@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Bakabot.Helpers;
 
 namespace Bakabot.Services;
@@ -52,17 +53,49 @@ public class DownloadService
     public bool IsViaProxyDownloaded() => File.Exists(PathHelper.ViaProxyJarPath);
 
     /// <summary>
-    /// 从 GitHub Releases 下载最新版 ViaProxy JAR。
-    /// 先通过 GitHub API 获取最新 Release 资产链接，失败则回退到已知版本链接。
+    /// 下载最新版 ViaProxy JAR（始终重新下载，不会因为旧文件已存在就跳过；
+    /// 覆盖前先删除旧文件，避免残留旧版本）。
     /// </summary>
     public async Task DownloadViaProxyAsync(
         IProgress<(long downloaded, long total)>? progress = null,
         CancellationToken ct = default)
     {
         Directory.CreateDirectory(PathHelper.ViaProxyDir);
+
+        // 覆盖已有 JAR：先删掉旧的，确保拿到的确实是新版本而不是被跳过
+        if (File.Exists(PathHelper.ViaProxyJarPath))
+        {
+            try { File.Delete(PathHelper.ViaProxyJarPath); }
+            catch (IOException)
+            {
+                throw new InvalidOperationException(
+                    "无法覆盖已有的 ViaProxy.jar（文件正被占用）。\n" +
+                    "请先在设置里停止正在使用 ViaProxy 的实例，或关闭启动器后重试。");
+            }
+        }
+
         var officialUrl = await ResolveViaProxyDownloadUrlAsync(ct);
         await DownloadWithFallbackAsync(ToGhMirror(officialUrl), officialUrl,
             PathHelper.ViaProxyJarPath, progress, ct);
+    }
+
+    /// <summary>本地已安装的 ViaProxy 版本号（无 JAR 或读取失败返回 null）</summary>
+    public string? GetInstalledViaProxyVersion() => TryGetInstalledViaProxyVersion();
+
+    /// <summary>
+    /// 查询 GitHub 上 ViaProxy 的最新版本号（供设置页提示"有新版本可更新"，失败返回 null）
+    /// </summary>
+    public async Task<string?> GetLatestViaProxyVersionAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var json = await _httpClient.GetStringAsync(
+                "https://api.github.com/repos/ViaVersion/ViaProxy/releases/latest", ct);
+            using var doc = JsonDocument.Parse(json);
+            var tag = doc.RootElement.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
+            return string.IsNullOrWhiteSpace(tag) ? null : tag!.TrimStart('v', 'V');
+        }
+        catch { return null; }
     }
 
     /// <summary>NapCat 是否已下载（解压目录存在且非空）</summary>
@@ -129,26 +162,115 @@ public class DownloadService
         }
     }
 
-    /// <summary>通过 GitHub API 解析最新 ViaProxy 下载地址，失败则回退到固定链接</summary>
+    /// <summary>
+    /// 已知可用的 ViaProxy 版本，仅作为前两种方式都失败时的最后兜底。
+    /// 每次 ViaProxy 发新版本可以顺手更新这里，但正常情况下用不到它。
+    /// </summary>
+    private const string ViaProxyPinnedFallbackVersion = "3.4.14";
+
+    /// <summary>从 GitHub Releases 解析最新 ViaProxy JAR 的直链（best-effort，失败返回 null）</summary>
+    private async Task<string?> TryResolveViaProxyUrlFromApiAsync(CancellationToken ct)
+    {
+        var json = await _httpClient.GetStringAsync(
+            "https://api.github.com/repos/ViaVersion/ViaProxy/releases/latest", ct);
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("assets", out var assets)) return null;
+
+        var candidates = new List<string>();
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.GetProperty("name").GetString() ?? "";
+            if (!name.StartsWith("ViaProxy", StringComparison.OrdinalIgnoreCase)) continue;
+            // 不要 java8 专版，优先取"普通名字"的 jar（ViaProxy-x.y.z.jar）
+            if (!name.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) continue;
+            var url = asset.GetProperty("browser_download_url").GetString();
+            if (string.IsNullOrWhiteSpace(url)) continue;
+            if (name.Contains("java8", StringComparison.OrdinalIgnoreCase)) { candidates.Add(url!); continue; }
+            return url;
+        }
+        return candidates.Count > 0 ? candidates[0] : null;
+    }
+
+    /// <summary>
+    /// 解析要下载的 ViaProxy JAR 地址（尽量拿到最新版）：
+    ///   1. GitHub API 的真实最新 release（最准，能挑掉 java8 资产）
+    ///   2. releases/latest/download 重定向直链（不需要 API，规避限流）
+    ///   3. 代码内记录的已知版本（最后兜底）
+    /// 每次解析出的结果都与本地已装版本比较，用于提示是否需要重新下载。
+    /// </summary>
     private async Task<string> ResolveViaProxyDownloadUrlAsync(CancellationToken ct)
     {
-        const string fallbackUrl =
-            "https://github.com/ViaVersion/ViaProxy/releases/download/v3.4.12/ViaProxy-3.4.12.jar";
+        // 1) API 拿到确切的资产链接
         try
         {
-            var json = await _httpClient.GetStringAsync(
-                "https://api.github.com/repos/ViaVersion/ViaProxy/releases/latest", ct);
-            using var doc = JsonDocument.Parse(json);
-            foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
+            var fromApi = await TryResolveViaProxyUrlFromApiAsync(ct);
+            if (!string.IsNullOrWhiteSpace(fromApi)) return fromApi!;
+        }
+        catch { /* API 限流 / 网络波动，继续往下试 */ }
+
+        // 2) 不需要 API 的最新车次链接（GitHub 会 302 到最新的同名资产）
+        var latestUrl =
+            $"https://github.com/ViaVersion/ViaProxy/releases/latest/download/ViaProxy-{ViaProxyPinnedFallbackVersion}.jar";
+        try
+        {
+            using var head = new HttpRequestMessage(HttpMethod.Head, latestUrl);
+            using var resp = await _httpClient.SendAsync(head, ct);
+            if (resp.IsSuccessStatusCode) return latestUrl;
+        }
+        catch { /* 忽略，走兜底 */ }
+
+        // 3) 已知版本直链
+        return $"https://github.com/ViaVersion/ViaProxy/releases/download/" +
+               $"v{ViaProxyPinnedFallbackVersion}/ViaProxy-{ViaProxyPinnedFallbackVersion}.jar";
+    }
+
+    /// <summary>
+    /// 读取本地已安装 ViaProxy 的版本号。
+    /// JAR 内没有任何版本元数据，所以从 ViaProxy 自己写的日志里取
+    /// （它启动时会打印 "Initializing ViaProxy CLI v3.4.12"）。
+    /// 读不到返回 null。
+    /// </summary>
+    private static string? TryGetInstalledViaProxyVersion()
+    {
+        try
+        {
+            if (!File.Exists(PathHelper.ViaProxyJarPath)) return null;
+
+            var logDir = Path.Combine(PathHelper.ViaProxyDir, "logs");
+            if (Directory.Exists(logDir))
             {
-                var name = asset.GetProperty("name").GetString() ?? "";
-                if (name.StartsWith("ViaProxy") && name.EndsWith(".jar")
-                    && !name.Contains("java8", StringComparison.OrdinalIgnoreCase))
-                    return asset.GetProperty("browser_download_url").GetString() ?? fallbackUrl;
+                // latest.log 是当前会话，debug.log 兜底；都取不到就扫最近的历史日志
+                foreach (var name in new[] { "latest.log", "debug.log" })
+                {
+                    var v = ExtractViaProxyVersion(Path.Combine(logDir, name));
+                    if (v != null) return v;
+                }
+
+                var recent = new DirectoryInfo(logDir).GetFiles("*.log")
+                    .OrderByDescending(f => f.LastWriteTime)
+                    .FirstOrDefault();
+                if (recent != null) return ExtractViaProxyVersion(recent.FullName);
             }
         }
-        catch { /* API 限流或网络问题，回退到已知版本 */ }
-        return fallbackUrl;
+        catch { /* 读不到就算了，不影响下载功能 */ }
+        return null;
+    }
+
+    /// <summary>从日志文本里提取 "Initializing ViaProxy CLI vX.Y.Z" 的版本号</summary>
+    private static string? ExtractViaProxyVersion(string logPath)
+    {
+        try
+        {
+            if (!File.Exists(logPath)) return null;
+            using var reader = new StreamReader(logPath);
+            for (var i = 0; i < 200 && reader.ReadLine() is { } line; i++)
+            {
+                var m = Regex.Match(line, @"ViaProxy CLI v(\d+\.\d+(?:\.\d+)?)");
+                if (m.Success) return m.Groups[1].Value;
+            }
+        }
+        catch { /* ignore */ }
+        return null;
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.IO;
 using System.Threading.Tasks;
@@ -83,10 +84,49 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private double _viaProxyProgress = 0;
 
+    /// <summary>正版账号状态文本（含当前选用的是哪个账号）</summary>
     [ObservableProperty]
     private string _viaProxyAccountStatusText = string.Empty;
 
-    // ─── NapCat QQ 协议端 ───
+    /// <summary>可用正版账号列表（显示为「序号: 账号名」）</summary>
+    public ObservableCollection<ViaProxyService.AccountInfo> ViaProxyAccounts { get; } = new();
+
+    /// <summary>当前选用第几个正版账号（0 起）</summary>
+    private int _viaProxyAccountIndex;
+
+    /// <summary>
+    /// 当前选中的正版账号（绑定 ComboBox）。setter 会在切换时写回设置，
+    /// 供下次启动实例时传给 ViaProxy——不再写死用第一个账号。
+    /// </summary>
+    public ViaProxyService.AccountInfo? SelectedViaProxyAccount
+    {
+        get => _viaProxyAccountIndex >= 0 && _viaProxyAccountIndex < ViaProxyAccounts.Count
+            ? ViaProxyAccounts[_viaProxyAccountIndex]
+            : null;
+        set
+        {
+            if (value is not { } acc || acc.Index == _viaProxyAccountIndex) return;
+
+            _viaProxyAccountIndex = acc.Index;
+            _settingsService.UpdateSettings(s => s.ViaProxyAccountIndex = acc.Index);
+            OnPropertyChanged();
+            UpdateViaProxyAccountStatusText();
+        }
+    }
+
+    /// <summary>本地已安装的 ViaProxy 版本号（从 JAR 读取，null = 未安装或读不到）</summary>
+    [ObservableProperty]
+    private string? _viaProxyInstalledVersion;
+
+    /// <summary>GitHub 上 ViaProxy 的最新版本号（查询失败为 null）</summary>
+    [ObservableProperty]
+    private string? _viaProxyLatestVersion;
+
+    /// <summary>下载按钮文案（已装旧版时提示可更新）</summary>
+    [ObservableProperty]
+    private string _viaProxyDownloadButtonText = "下载 ViaProxy";
+
+    /// <summary>NapCat QQ 协议端</summary>
     [ObservableProperty]
     private bool _isNapCatDownloaded;
 
@@ -116,7 +156,7 @@ public partial class SettingsViewModel : ObservableObject
     private string _mcpIpWhitelist = string.Empty;
 
     // ─── 关于 ───
-    public string AppVersion => "2.7.1";
+    public string AppVersion => "2.8.0";
     public string DotNetVersion => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
     public string AppDataPath => PathHelper.RootDir;
 
@@ -227,13 +267,80 @@ public partial class SettingsViewModel : ObservableObject
 
         DownloadStatusText = IsNodeInstalled ? "Node.js 运行时已就绪" : "未安装 Node.js 运行时";
         BaseAgentStatusText = IsBaseAgentDownloaded ? "基础包已下载" : "基础包未下载";
-        ViaProxyStatusText = IsViaProxyDownloaded ? "ViaProxy.jar 已就绪" : "ViaProxy.jar 未下载";
         JavaStatusText = JavaHelper.GetStatusText(JavaPath);
 
-        var accountCount = _viaProxyService.GetAccountCount();
-        ViaProxyAccountStatusText = accountCount > 0
-            ? $"已配置 {accountCount} 个正版账号，可进入正版验证服务器"
-            : "未配置正版账号（仅离线服直连需要；进正版服前请先添加）";
+        // 显示本地已装版本，并尽量提示 GitHub 上是否有更新版本
+        ViaProxyInstalledVersion = _downloadService.GetInstalledViaProxyVersion();
+        RefreshViaProxyStatusText();
+        _ = CheckViaProxyUpdateAsync();
+
+        var accounts = _viaProxyService.GetAccounts();
+        ViaProxyAccounts.Clear();
+        foreach (var acc in accounts) ViaProxyAccounts.Add(acc);
+
+        // 选中项与设置不一致时（账号被删除/新增）回写，保证界面与设置同步
+        var selected = _viaProxyService.ClampAccountIndex(_settingsService.Settings.ViaProxyAccountIndex);
+        if (_settingsService.Settings.ViaProxyAccountIndex != selected)
+            _settingsService.UpdateSettings(s => s.ViaProxyAccountIndex = selected);
+        _viaProxyAccountIndex = selected;
+        OnPropertyChanged(nameof(SelectedViaProxyAccount));
+
+        UpdateViaProxyAccountStatusText();
+    }
+
+    /// <summary>刷新「ViaProxy JAR」状态文本：显示本地版本与是否有新版</summary>
+    private void RefreshViaProxyStatusText()
+    {
+        if (!IsViaProxyDownloaded)
+        {
+            ViaProxyStatusText = "ViaProxy.jar 未下载";
+            ViaProxyDownloadButtonText = "下载 ViaProxy";
+            return;
+        }
+
+        var installed = string.IsNullOrWhiteSpace(ViaProxyInstalledVersion) ? "版本未知" : $"v{ViaProxyInstalledVersion}";
+        var latest = ViaProxyLatestVersion;
+
+        if (!string.IsNullOrWhiteSpace(latest) &&
+            !string.Equals(latest, ViaProxyInstalledVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            ViaProxyStatusText = $"已就绪 {installed}｜GitHub 上有新版 v{latest}，点右侧按钮可更新";
+            ViaProxyDownloadButtonText = $"更新到 v{latest}";
+        }
+        else
+        {
+            ViaProxyStatusText = $"已就绪 {installed}" + (latest != null ? "（已是最新）" : "");
+            ViaProxyDownloadButtonText = "重新下载 / 更新 ViaProxy";
+        }
+    }
+
+    /// <summary>后台查询 GitHub 上 ViaProxy 的最新版本，仅用于提示，不影响界面可用性</summary>
+    private async Task CheckViaProxyUpdateAsync()
+    {
+        try
+        {
+            var latest = await _downloadService.GetLatestViaProxyVersionAsync();
+            if (string.IsNullOrWhiteSpace(latest)) return;
+
+            ViaProxyLatestVersion = latest;
+            RefreshViaProxyStatusText();
+        }
+        catch { /* 网络不可用时不提示，保持原有状态文本 */ }
+    }
+
+    /// <summary>刷新「正版账号」状态文本（含当前选用的是哪个账号）</summary>
+    private void UpdateViaProxyAccountStatusText()
+    {
+        if (ViaProxyAccounts.Count == 0)
+        {
+            ViaProxyAccountStatusText = "未配置正版账号（仅离线服直连需要；进正版服前请先添加）";
+            return;
+        }
+
+        var idx = _viaProxyAccountIndex;
+        var name = idx >= 0 && idx < ViaProxyAccounts.Count ? ViaProxyAccounts[idx].Name : null;
+        ViaProxyAccountStatusText =
+            $"已配置 {ViaProxyAccounts.Count} 个正版账号｜进入正版验证服时使用第 {idx + 1} 个{(name != null ? $"：{name}" : "")}";
     }
     /// <summary>一键下载：依次触发 Node.js 运行时与 ViaProxy 下载（不含基础包，原两个下载按钮保持不变）</summary>
     [RelayCommand]
@@ -483,7 +590,11 @@ public partial class SettingsViewModel : ObservableObject
             await _downloadService.DownloadViaProxyAsync(progress);
 
             IsViaProxyDownloaded = true;
-            ViaProxyStatusText = "ViaProxy.jar 下载完成！";
+            IsDownloadingViaProxy = false;   // 先复位，否则界面会误报"有新版可更新"
+            RefreshStatus();
+            ViaProxyStatusText = string.IsNullOrWhiteSpace(ViaProxyInstalledVersion)
+                ? "ViaProxy 下载完成！"
+                : $"ViaProxy v{ViaProxyInstalledVersion} 下载完成！";
         }
         catch (Exception ex)
         {

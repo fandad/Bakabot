@@ -1,4 +1,4 @@
-﻿using Bakabot.Helpers;
+using Bakabot.Helpers;
 using Bakabot.Models;
 using DnsClient;
 using System.Diagnostics;
@@ -40,12 +40,16 @@ public class NodeProcessManager : IDisposable
     /// <summary>进程退出时触发</summary>
     public event EventHandler<int>? ProcessExited;
 
+    /// <summary>ViaProxy 登录正版验证服务器时使用第几个正版账号（0 起，来自设置里的「正版账号」选择）</summary>
+    private readonly int _viaProxyAccountIndex;
+
     public NodeProcessManager(string instanceName, AuthInterceptor authInterceptor,
-        ViaProxyService? viaProxyService = null)
+        ViaProxyService? viaProxyService = null, int viaProxyAccountIndex = 0)
     {
         InstanceName = instanceName;
         _authInterceptor = authInterceptor;
         _viaProxyService = viaProxyService;
+        _viaProxyAccountIndex = viaProxyAccountIndex;
     }
 
     /// <summary>
@@ -157,8 +161,16 @@ public class NodeProcessManager : IDisposable
                 }
 
                 EmitInfo($"[ViaProxy] 检测到版本 {configVersion}，将通过 ViaProxy 连接（无需服务器 ViaVersion 插件）");
+                // 用设置里选好的正版账号，并把用的是哪个账号写进日志，避免出现
+                // “日志说以 A 登录、实际以 B 登录”这种自相矛盾的情况
+                var viaProxyAccountIndex = _viaProxyService!.ClampAccountIndex(_viaProxyAccountIndex);
                 if (useAccountAuth)
-                    EmitInfo("[ViaProxy] 正版验证服务器：将由 ViaProxy 使用已配置的正版账号登录");
+                {
+                    var accountName = _viaProxyService.GetAccountName(viaProxyAccountIndex);
+                    EmitInfo(accountName != null
+                        ? $"[ViaProxy] 正版验证服务器：将由 ViaProxy 使用第 {viaProxyAccountIndex + 1} 个正版账号「{accountName}」登录"
+                        : $"[ViaProxy] 正版验证服务器：将由 ViaProxy 使用第 {viaProxyAccountIndex + 1} 个正版账号登录");
+                }
                 if (autoAcceptPack)
                     EmitInfo("[ViaProxy] 已启用自动接受资源包（强制资源包服务器可正常进入）");
 
@@ -171,6 +183,7 @@ public class NodeProcessManager : IDisposable
                         configVersion!,
                         fakeAcceptResourcePacks: autoAcceptPack,
                         useAccountAuth: useAccountAuth,
+                        accountIndex: viaProxyAccountIndex,
                         logAction: text => EmitInfo(text));
 
                     // 将机器人的连接目标重定向到本地 ViaProxy 代理

@@ -222,7 +222,8 @@ public class InstanceManager
         if (RunningProcesses.ContainsKey(instanceName))
             throw new InvalidOperationException($"实例 '{instanceName}' 已在运行中。");
 
-        var pm = new NodeProcessManager(instanceName, _authInterceptor, _viaProxyService);
+        var pm = new NodeProcessManager(instanceName, _authInterceptor, _viaProxyService,
+            _settingsService.Settings.ViaProxyAccountIndex);
 
         pm.ProcessExited += (_, exitCode) =>
         {

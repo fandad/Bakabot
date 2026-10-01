@@ -1,0 +1,296 @@
+{
+  "_comment": "Bakabot AI 服务商预设表。供「创建/编辑实例」的 AI 配置界面使用，选中后自动填充 API URL 与模型名。",
+  "_license": "服务商端点与模型名数据参考自 cc-switch (https://github.com/farion1231/cc-switch)，MIT License, Copyright (c) 2025 Jason Young。此处只保留技术信息（端点/模型名），已移除全部推广与返利参数。",
+  "_usage": "baseUrl 填 OpenAI 兼容基址（Bakabot 走 /chat/completions）。models 按常用程度排序，models[0] 即默认模型。实际可用模型可在界面点「拉取模型」自动获取。",
+  "_notes_rule": "名称只写干净品牌名，不加任何后缀或免费标记：限时免费/注册送额度/有免费档这几种性质完全不同，一个标签说不清，容易误导成永久免费。具体情况一律写在 note 里说清楚。",
+  "_categories": {
+    "cn": "国内官方（直连快，多为按量付费）",
+    "intl": "国际官方",
+    "hub": "聚合/中转平台",
+    "local": "本地部署"
+  },
+
+  "providers": [
+    {
+      "id": "agnes",
+      "name": "Agnes AI · 国内节点",
+      "category": "cn",
+      "baseUrl": "https://api.agnes-ai.cn/v1",
+      "models": ["agnes-3.0-flash", "agnes-2.5-flash", "agnes-2.5-pro"],
+      "registerUrl": "https://agnes-ai.cn",
+      "note": "Agnes AI 国内站，直连更快；官网 agnes-ai.cn。agnes-3.0-flash 是最新文本模型。agnes-2.5-flash 目前官方限时免费（官方称无限期，但随时可能改为收费）。兼容 OpenAI / Responses / Anthropic 三种协议"
+    },
+    {
+      "id": "agnes-intl",
+      "name": "Agnes AI · 国际节点",
+      "category": "cn",
+      "baseUrl": "https://apihub.agnes-ai.com/v1",
+      "models": ["agnes-3.0-flash", "agnes-2.5-flash", "agnes-2.5-pro"],
+      "registerUrl": "https://agnes-ai.com",
+      "note": "Agnes AI 国际站，官网 agnes-ai.com。在官网注册的是国际账号就用这个；国内账号请用上面那条 api.agnes-ai.cn。agnes-2.5-flash 同样是限时免费"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "category": "cn",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "models": ["deepseek-chat", "deepseek-reasoner"],
+      "registerUrl": "https://platform.deepseek.com",
+      "note": "按量付费，价格便宜性价比高，适合聊天。deepseek-chat 是通用对话模型，deepseek-reasoner 是推理模型"
+    },
+    {
+      "id": "volcengine",
+      "name": "火山方舟",
+      "category": "cn",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "models": ["doubao-seed-2-0-lite-260215", "doubao-seed-1-6-250615"],
+      "registerUrl": "https://console.volcengine.com/ark",
+      "note": "字节豆包大模型，Bakabot 的默认服务商；官网 volcengine.com。模型名要填控制台里的「推理接入点 ID」或模型 ID，以控制台为准"
+    },
+    {
+      "id": "moonshot",
+      "name": "Kimi",
+      "category": "cn",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "models": ["kimi-k2-turbo-preview", "moonshot-v1-8k"],
+      "registerUrl": "https://platform.moonshot.cn",
+      "note": "月之暗面出品，长上下文见长；官网 moonshot.cn。模型名以控制台「模型广场」为准"
+    },
+    {
+      "id": "zhipu",
+      "name": "智谱 AI",
+      "category": "cn",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+      "models": ["glm-4-flash", "glm-4-plus"],
+      "registerUrl": "https://open.bigmodel.cn",
+      "note": "GLM 系列。glm-4-flash 系列可免费调用（官方长期保留的免费档，非限时活动），其余模型按量付费"
+    },
+    {
+      "id": "dashscope",
+      "name": "阿里云百炼",
+      "category": "cn",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "models": ["qwen-plus", "qwen-turbo", "qwen-max"],
+      "registerUrl": "https://bailian.console.aliyun.com",
+      "note": "通义千问系列，注意要用 compatible-mode（OpenAI 兼容）这一条端点，用别的路径会连不上"
+    },
+    {
+      "id": "minimax",
+      "name": "MiniMax",
+      "category": "cn",
+      "baseUrl": "https://api.minimax.chat/v1",
+      "models": ["abab6.5s-chat", "MiniMax-Text-01"],
+      "registerUrl": "https://platform.minimaxi.com",
+      "note": "模型名以控制台为准"
+    },
+    {
+      "id": "siliconflow",
+      "name": "SiliconFlow",
+      "category": "cn",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "models": ["Qwen/Qwen2.5-7B-Instruct", "deepseek-ai/DeepSeek-V3"],
+      "registerUrl": "https://cloud.siliconflow.cn",
+      "note": "硅基流动，聚合多家开源模型；部分小模型可免费调用。模型名要带厂商前缀（如 Qwen/...）"
+    },
+    {
+      "id": "stepfun",
+      "name": "阶跃星辰",
+      "category": "cn",
+      "baseUrl": "https://api.stepfun.com/v1",
+      "models": ["step-2-16k", "step-1-flash"],
+      "registerUrl": "https://platform.stepfun.com",
+      "note": "Step 系列模型"
+    },
+    {
+      "id": "qianfan",
+      "name": "百度千帆",
+      "category": "cn",
+      "baseUrl": "https://qianfan.baidubce.com/v2",
+      "models": ["ernie-4.5-turbo-128k", "ernie-speed-128k"],
+      "registerUrl": "https://console.bce.baidu.com/qianfan",
+      "note": "文心一言系列"
+    },
+    {
+      "id": "hunyuan",
+      "name": "腾讯混元",
+      "category": "cn",
+      "baseUrl": "https://api.hunyuan.cloud.tencent.com/v1",
+      "models": ["hunyuan-turbo", "hunyuan-lite"],
+      "registerUrl": "https://console.cloud.tencent.com/hunyuan",
+      "note": "hunyuan-lite 可免费调用（官方免费档），其余模型按量付费"
+    },
+    {
+      "id": "xfyun",
+      "name": "讯飞星火",
+      "category": "cn",
+      "baseUrl": "https://spark-api-open.xf-yun.com/v1",
+      "models": ["generalv3.5", "lite"],
+      "registerUrl": "https://console.xfyun.cn",
+      "note": "注意它另有 WebSocket 版端点，这里用的是 HTTP 兼容版"
+    },
+    {
+      "id": "baichuan",
+      "name": "百川智能",
+      "category": "cn",
+      "baseUrl": "https://api.baichuan-ai.com/v1",
+      "models": ["Baichuan4", "Baichuan3-Turbo"],
+      "registerUrl": "https://platform.baichuan-ai.com",
+      "note": ""
+    },
+    {
+      "id": "sensetime",
+      "name": "商汤日日新",
+      "category": "cn",
+      "baseUrl": "https://api.sensenova.cn/compatible-mode/v1",
+      "models": ["SenseChat-5", "SenseChat-Turbo"],
+      "registerUrl": "https://platform.sensenova.cn",
+      "note": "注意要用 compatible-mode 端点"
+    },
+    {
+      "id": "modelscope",
+      "name": "魔搭 ModelScope",
+      "category": "cn",
+      "baseUrl": "https://api-inference.modelscope.cn/v1",
+      "models": ["Qwen/Qwen2.5-7B-Instruct"],
+      "registerUrl": "https://modelscope.cn",
+      "note": "阿里旗下。提供每日免费推理额度，但有调用次数上限，用完当天不可再用"
+    },
+
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "category": "intl",
+      "baseUrl": "https://api.openai.com/v1",
+      "models": ["gpt-4o-mini", "gpt-4o"],
+      "registerUrl": "https://platform.openai.com",
+      "note": "国内直连通常需要加速器；按量付费，无免费档"
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "category": "intl",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "models": ["gemini-2.0-flash", "gemini-2.5-flash"],
+      "registerUrl": "https://aistudio.google.com",
+      "note": "要用它的 OpenAI 兼容端点（路径末尾是 openai）。官方提供长期免费档，但有每分钟/每天调用次数限制"
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "category": "intl",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+      "registerUrl": "https://console.groq.com",
+      "note": "推理速度极快。提供免费档，有速率限制"
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral AI",
+      "category": "intl",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "models": ["mistral-small-latest", "open-mistral-nemo"],
+      "registerUrl": "https://console.mistral.ai",
+      "note": "提供免费实验档（有速率限制），超出后按量付费"
+    },
+    {
+      "id": "xai",
+      "name": "xAI Grok",
+      "category": "intl",
+      "baseUrl": "https://api.x.ai/v1",
+      "models": ["grok-2-latest", "grok-beta"],
+      "registerUrl": "https://console.x.ai",
+      "note": "国内直连通常需要加速器；按量付费"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "category": "intl",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "models": ["claude-sonnet-4-5", "claude-haiku-4-5"],
+      "registerUrl": "https://console.anthropic.com",
+      "note": "Claude 系列。它原生是 Anthropic 协议，而 Bakabot 走 OpenAI 兼容格式，这里直连多半不通；建议用中转平台，或换成支持 OpenAI 格式的网关"
+    },
+
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "category": "hub",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "models": ["deepseek/deepseek-chat", "openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"],
+      "registerUrl": "https://openrouter.ai",
+      "note": "聚合平台，一个 Key 调用各家模型；模型名要带厂商前缀（如 deepseek/...）。部分模型免费，其余按量计费"
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA NIM",
+      "category": "hub",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "models": ["meta/llama-3.3-70b-instruct"],
+      "registerUrl": "https://build.nvidia.com",
+      "note": "注册赠送一定的免费调用额度，用完需付费"
+    },
+    {
+      "id": "dmxapi",
+      "name": "DMXAPI",
+      "category": "hub",
+      "baseUrl": "https://www.dmxapi.cn/v1",
+      "models": ["deepseek-chat", "gpt-4o-mini"],
+      "registerUrl": "https://www.dmxapi.cn",
+      "note": "国内中转平台，一个 Key 接多家模型；按量付费"
+    },
+    {
+      "id": "aihubmix",
+      "name": "AiHubMix",
+      "category": "hub",
+      "baseUrl": "https://aihubmix.com/v1",
+      "models": ["gpt-4o-mini", "claude-3-5-sonnet-20241022"],
+      "registerUrl": "https://aihubmix.com",
+      "note": "聚合中转平台；按量付费"
+    },
+    {
+      "id": "oneapi",
+      "name": "自建中转站",
+      "category": "hub",
+      "baseUrl": "",
+      "models": [],
+      "registerUrl": "",
+      "note": "自己或第三方搭的 OneAPI / NewAPI 之类网关，填你自己的地址即可；格式与 OpenAI 完全一致"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "category": "local",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "models": ["qwen2.5:7b", "llama3.1:8b"],
+      "registerUrl": "https://ollama.com",
+      "note": "在本机跑模型，不花钱也不需要 API Key（Key 随便填），但要求本机配置够。地址按你实际端口改"
+    },
+    {
+      "id": "lmstudio",
+      "name": "LM Studio",
+      "category": "local",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "models": [],
+      "registerUrl": "https://lmstudio.ai",
+      "note": "在本机跑模型，不花钱也不需要 API Key。模型名在 LM Studio 界面里看"
+    },
+    {
+      "id": "vllm",
+      "name": "vLLM 自建服务",
+      "category": "local",
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "models": [],
+      "registerUrl": "",
+      "note": "自己部署的推理服务，OpenAI 兼容端点"
+    },
+    {
+      "id": "custom",
+      "name": "自定义",
+      "category": "hub",
+      "baseUrl": "",
+      "models": [],
+      "registerUrl": "",
+      "note": "完全手动填写 API URL、模型名与 Key"
+    }
+  ]
+}

@@ -335,12 +335,20 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchResourcePackAutoAccept(content);
         content = PatchEnvPatch(content);
         content = PatchChatTrigger(content);
+        content = PatchOwnerKeywordMode(content);   // 第 4 种触发模式（主人+关键词）
         content = PatchMsgTellMode(content);
         content = PatchQQBridgeV2(content);
         content = PatchTpSplitMount(content);
         content = PatchQuickCommands(content);
         content = PatchStartupGreeting(content);
         content = PatchCreateBotOptions(content);
+
+        // 取物提示词：告知模型附魔书要传附魔名（否则只会传 enchanted_book，无法区分是哪本）
+        // 剥离时必须只去掉"追加的那一段"，不能删整行——提示词是接在锚点句尾的，
+        // 删整行会把锚点句子本身也删掉，导致下次再也注入不回去（这里踩过一次坑）
+        content = StripTakeItemsPrompt(content);
+        if (content.Contains(TakeItemsPromptAnchor))
+            content = content.Replace(TakeItemsPromptAnchor, TakeItemsPromptAnchor + TakeItemsPromptSuffix);
 
         if (content != original)
         {
@@ -353,6 +361,9 @@ module.exports = StrictAutoTeleportLogin;
 
         // 行动文件（src/actions、plugins）的公屏播报门禁（由 SUPPRESS_ACTION_CHAT 开关控制）
         PatchActionChatGate(srcDir);
+
+        // 容器取物读取健壮性（等待 + 重试，避免误判容器为空）
+        PatchTakeItems(srcDir);
 
         // utils/chat.js 的 /msg 私信模式支持（TELL_MODE=msg）
         PatchTellModeChatUtils(srcDir);
@@ -387,6 +398,7 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchResourcePackAutoAccept(content);
         content = PatchEnvPatch(content);
         content = PatchChatTrigger(content);
+        content = PatchOwnerKeywordMode(content);   // 第 4 种触发模式（主人+关键词）
         content = PatchMsgTellMode(content);
         content = PatchQQBridgeV2(content);
         content = PatchTpSplitMount(content);
@@ -394,10 +406,18 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchStartupGreeting(content);
         content = PatchCreateBotOptions(content);
 
+        // 取物提示词同步刷新（先剥离追加段再重新追加，保证幂等）
+        content = StripTakeItemsPrompt(content);
+        if (content.Contains(TakeItemsPromptAnchor))
+            content = content.Replace(TakeItemsPromptAnchor, TakeItemsPromptAnchor + TakeItemsPromptSuffix);
+
         File.WriteAllText(indexJs, content, Encoding.UTF8);
 
         // 行动文件的公屏播报门禁同步刷新（内部自行先剥离旧注入再重新应用）
         PatchActionChatGate(srcDir);
+
+        // 容器取物补丁同步刷新（幂等：先剥离本补丁各处注入，再无条件重新注入）
+        PatchTakeItems(srcDir);
 
         // /msg 私信模式补丁同步刷新（幂等，已有标记则跳过）
         PatchTellModeChatUtils(srcDir);
@@ -421,7 +441,7 @@ module.exports = StrictAutoTeleportLogin;
         var tmp = Path.Combine(Path.GetTempPath(), "bakabot_sync_" + Guid.NewGuid().ToString("N"));
         try
         {
-            ZipFile.ExtractToDirectory(zipPath, tmp);
+            ExtractZipSafe(zipPath, tmp);
     
             // src/ 全量同步
             var srcFrom = Path.Combine(tmp, "src");
@@ -483,6 +503,43 @@ module.exports = StrictAutoTeleportLogin;
         }
     }
     
+    /// <summary>
+    /// 安全解压 zip：逐条解压并允许覆盖。
+    ///
+    /// 不用 ZipFile.ExtractToDirectory(path, dir) 的默认重载——那不是 overwrite 模式，
+    /// 一旦 zip 里存在**重名条目**（实测基础包里 minecraft-data\data\dataPaths.json 就重复），
+    /// 会直接抛 IOException("...already exists") 使整段同步中断。
+    ///
+    /// 另外有的 zip 用反斜杠当分隔符（Windows 打的包），这里统一规范化，
+    /// 否则 Path.Combine 出来会变成文件名里带反斜杠的畸形路径。
+    /// </summary>
+    private static void ExtractZipSafe(string zipPath, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+        using var archive = ZipFile.OpenRead(zipPath);
+        foreach (var entry in archive.Entries)
+        {
+            // 目录条目（以 / 或 \ 结尾，或名字为空）
+            if (string.IsNullOrEmpty(entry.Name)) continue;
+
+            var rel = entry.FullName.Replace('\\', '/').TrimStart('/');
+            if (rel.Length == 0) continue;
+
+            var dest = Path.Combine(destDir, rel.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+
+            try
+            {
+                // 重名条目以"后出现的为准"，与 overwrite 语义一致
+                entry.ExtractToFile(dest, overwrite: true);
+            }
+            catch
+            {
+                // 单个条目失败（加密、损坏等）不拖垮整段同步
+            }
+        }
+    }
+
     private static void CopyDirOverwrite(string from, string to)
     {
         foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
@@ -902,6 +959,392 @@ module.exports = StrictAutoTeleportLogin;
 
         if (content != original)
             File.WriteAllText(file, content, Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// 「主人关键词」触发模式补丁（第 4 种模式，注入 index.js 的聊天触发补丁块内）。
+    ///
+    /// 语义（用户 2026-10-02 确认）：**主人 AND 关键词**——即 owner_only 与 keyword_only 的叠加，
+    /// 只有主人说了含关键词的消息才触发；他人说关键词不触发、主人不带关键词也不触发。
+    /// 纯匹配规则，不引入任何"激活状态"，所以没有有效期/休眠词的概念
+    /// （需要停时用现有的停止机制即可：主人说"停止/取消"由 LLM 走 stop，
+    ///  或主人直接发精确的 stop，底层会 stopAll）。
+    ///
+    /// 注意：本模式必须配置 CHAT_TRIGGER，否则关键词恒为空、永远不会触发（UI 里已注明）。
+    ///
+    /// 幂等：两处都是精确字符串替换，已替换过的形态匹配不到即天然跳过。
+    /// </summary>
+    private static string PatchOwnerKeywordMode(string content)
+    {
+        const string marker = "__bakabot_owner_keyword__";
+
+        // 1) 模式白名单：放行 owner_keyword（原逻辑会把不认识的值退回 hybrid）
+        content = content.Replace(
+            "if (mode !== 'owner_only' && mode !== 'keyword_only') mode = 'hybrid';",
+            "if (mode !== 'owner_only' && mode !== 'keyword_only' && mode !== 'owner_keyword') mode = 'hybrid'; // " + marker);
+
+        // 2) 放行判定：owner_keyword = 主人 && 关键词
+        content = content.Replace(
+            "var allow = c.mode === 'owner_only' ? owner\n" +
+            "                : c.mode === 'keyword_only' ? trig\n" +
+            "                : (owner || trig);",
+            "var allow = c.mode === 'owner_only' ? owner\n" +
+            "                : c.mode === 'keyword_only' ? trig\n" +
+            "                : c.mode === 'owner_keyword' ? (owner && trig) // " + marker + "：主人且说了关键词\n" +
+            "                : (owner || trig);");
+
+        return content;
+    }
+
+    /// <summary>取物提示词补丁的锚点句（index.js 里 TakeItemsAction 说明中的一句）</summary>
+    private const string TakeItemsPromptAnchor = "会按距离从近到远逐个打开容器寻找目标物品";
+
+    /// <summary>追加在锚点句尾的附魔说明（含标记，便于剥离）</summary>
+    private const string TakeItemsPromptSuffix =
+        "；找附魔书时 item_names 直接填附魔名（如 \"mending\" / \"经验修补\" / \"锋利5\"），不要只填 enchanted_book，否则分不清是哪本 // __bakabot_takeitems_prompt__";
+
+    /// <summary>
+    /// 剥离"附加在锚点句尾"的取物提示词补充说明。
+    /// 只删追加的那一段，保留锚点句本体——否则下次注入会失去锚点（踩过这个坑）。
+    /// </summary>
+    private static string StripTakeItemsPrompt(string content)
+        => content.Replace(TakeItemsPromptAnchor + TakeItemsPromptSuffix, TakeItemsPromptAnchor);
+
+    /// <summary>
+    /// 容器取物补丁（注入 TakeItems.js，幂等，刷新补丁时自动同步）：
+    ///
+    /// 解决两个实测问题：
+    ///   1) 容器内容偶尔读成空 → 原来只读一次就放弃并换下一个容器，没有任何等待或重试。
+    ///      改为读到空则等 500ms 重读，最多 3 次；并打日志便于定位。
+    ///   2) 附魔书这类靠 NBT 区分的物品认不出来 → 原来只按 item.name 精确匹配
+    ///      （所有附魔书都叫 enchanted_book，无法区分"经验修补"），且 withdraw 没传 nbt。
+    ///      改为支持附魔名匹配（'mending' / '经验修补' / '锋利5' / 'enchanted_book mending'），
+    ///      并带上 item.nbt 取出正确的那一堆叠。
+    ///      NBT 解析与附魔名映射沿用 TradeVillager 里已验证过的做法
+    ///      （prismarine-nbt 的 simplify 对列表元素不可靠，故直接按原始 NBT 结构解析）。
+    ///
+    /// 幂等做法：先把本补丁注入的每一处都剥离干净（还原成上游原样），再无条件重新注入。
+    /// </summary>
+    private static void PatchTakeItems(string srcDir)
+    {
+        var file = Path.Combine(srcDir, "actions", "logic", "TakeItems.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8);
+        var original = content;
+        const string marker = "__bakabot_takeitems_wait__";
+
+        // 1) 剥离旧注入，保证刷新幂等：
+        //    恢复成原始的 containerItems() / items() 表达式（两行都还原）
+        content = Regex.Replace(content,
+            @"\s*const containerItems = \(\(\) => \{[^\r\n]*" + marker + @"[\s\S]*?\}\)\(\);",
+            "\n                    const containerItems = typeof chestWindow.containerItems === 'function'\n" +
+            "                        ? chestWindow.containerItems()\n" +
+            "                        : chestWindow.items();");
+
+        // 1b) 还原"读取处"的调用形式
+        content = content.Replace(
+            "// " + marker + "：空结果会等待并重读，避免容器内容包未到就判定为空\n" +
+            "                    const containerItems = await this._bakabotReadContainerItems(chestWindow); // " + marker,
+            "const containerItems = typeof chestWindow.containerItems === 'function'\n" +
+            "                        ? chestWindow.containerItems()\n" +
+            "                        : chestWindow.items();");
+
+        // 1c) 还原 withdraw 调用（去掉补丁加的 nbt 参数）
+        content = content.Replace(
+            "await chestWindow.withdraw(item.type, item.metadata, withdrawCount, item.nbt); // " + marker + "：带上 NBT 才能取对附魔书这类物品",
+            "await chestWindow.withdraw(item.type, item.metadata, withdrawCount);");
+
+        // 1d) 还原目标名过滤（去掉附魔匹配）——必须还原成上游**原样**，
+        //     否则重新注入时匹配不到，会退化成"半补丁"状态（这里踩过一次坑）
+        content = content.Replace(
+            "return containerItems.filter(item => this.itemNames.some(n => this._bakabotItemMatches(item, n))); // " + marker,
+            "return containerItems.filter(item => this.itemNames.includes(item.name));");
+
+        // 1d2) 移除诊断日志块（还原成上游原样的空箱分支）
+        // 用 .*? 吃掉中间所有内容，避免在 C# 字符串里书写含反引号的 JS 代码
+        content = Regex.Replace(content,
+            @"\r?\n[ \t]*// " + marker + @"：打印容器实况[\s\S]*?\r?\n[ \t]*console\.log\(.*?这个容器里没有目标物品.*?\);",
+            "\n                        console.log(`[TakeItemsAction] 这个容器里没有目标物品，尝试下一个。`);");
+
+        // 1e) 移除注入的 helper 方法块：用显式 START/END 边界，保证整块被吃掉
+        content = Regex.Replace(content,
+            @"[ \t]*// ===== __bakabot_takeitems_wait__ 辅助方法 START =====[\s\S]*?// ===== __bakabot_takeitems_wait__ 辅助方法 END =====[ \t]*\r?\n?",
+            "");
+
+        // 2) 注入（不设"是否已注入"的守卫：上面已把本补丁的每一处都剥离干净，
+        //    所以这里对每一处都无条件重新注入；已注入形态匹配不到即天然跳过，保证幂等）
+        {
+            const string anchor = "_filterTargetItems(containerItems) {";
+            if (content.Contains(anchor))
+                content = content.Replace(anchor, "__BAKABOT_HELPER__\n\n    " + anchor);
+
+            // 2b) 替换读取处，改用新的等待重试方法
+            content = Regex.Replace(content,
+                @"const containerItems = typeof chestWindow\.containerItems === 'function'\s*\r?\n\s*\? chestWindow\.containerItems\(\)\s*\r?\n\s*: chestWindow\.items\(\);",
+                "// " + marker + "：空结果会等待并重读，避免容器内容包未到就判定为空\n" +
+                "                    const containerItems = await this._bakabotReadContainerItems(chestWindow); // " + marker);
+
+            // 2c) 取出时带上 NBT：附魔书等物品靠 NBT 区分，不带 nbt 会取错堆叠
+            //     （参考 TradeVillager 的成熟做法；mineflayer 的 withdraw 第 4 参就是 nbt）
+            content = content.Replace(
+                "await chestWindow.withdraw(item.type, item.metadata, withdrawCount);",
+                "await chestWindow.withdraw(item.type, item.metadata, withdrawCount, item.nbt); // " + marker + "：带上 NBT 才能取对附魔书这类物品");
+
+            // 2d) 目标名匹配改为支持附魔（只按 name 精确匹配时，所有附魔书都叫 enchanted_book，无法区分）
+            content = content.Replace(
+                "return containerItems.filter(item => this.itemNames.includes(item.name));",
+                "return containerItems.filter(item => this.itemNames.some(n => this._bakabotItemMatches(item, n))); // " + marker);
+
+            // 2e) 匹配失败时打印诊断（DEBUG_MODE：容器里到底有什么、NBT 长什么样）
+            //     只加日志、不改行为；排查完可留作长期诊断
+            content = content.Replace(
+                "if (targetItems.length === 0) {\n                        emptyCount++;\n                        console.log(`[TakeItemsAction] 这个容器里没有目标物品，尝试下一个。`);",
+                "if (targetItems.length === 0) {\n                        emptyCount++;\n                        // " + marker + "：打印容器实况，便于定位\"认不出物品\"的原因\n" +
+                "                        if (process.env.DEBUG_MODE === 'true') {\n" +
+                "                            console.log(`[TakeItemsAction][诊断] 想要: ${JSON.stringify(this.itemNames)}`);\n" +
+                "                            console.log(`[TakeItemsAction][诊断] 容器内 ${containerItems.length} 项: ` + containerItems.map(it => {\n" +
+                "                                let en = '';\n" +
+                "                                try { const e = this._bakabotEnchants(it); if (e) en = ' 附魔=' + JSON.stringify(e); } catch (_) {}\n" +
+                "                                return `${it.name}(${it.displayName || ''})${en}`;\n" +
+                "                            }).join(' | '));\n" +
+                "                        }\n" +
+                "                        console.log(`[TakeItemsAction] 这个容器里没有目标物品，尝试下一个。`);");
+        }
+
+        // 4) 填充 helper 实现（避免在 Replace 里写大段带引号代码）
+        if (content.Contains("__BAKABOT_HELPER__"))
+        {
+            var helper =
+                "// ===== " + marker + " 辅助方法 START =====\n" +
+                "    // " + marker + "：带等待重试的容器读取（最多 3 次，空则 500ms 后重读）\n" +
+                "    async _bakabotReadContainerItems(win) {\n" +
+                "        const read = () => {\n" +
+                "            try {\n" +
+                "                return typeof win.containerItems === 'function' ? win.containerItems() : win.items();\n" +
+                "            } catch (e) {\n" +
+                "                if (process.env.DEBUG_MODE === 'true') console.log(`[TakeItemsAction] 读取容器内容出错: ${e.message}`);\n" +
+                "                return [];\n" +
+                "            }\n" +
+                "        };\n" +
+                "        let items = read();\n" +
+                "        if (items && items.length > 0) return items;\n" +
+                "        for (let attempt = 2; attempt <= 3; attempt++) {\n" +
+                "            await this._sleep(500);\n" +
+                "            const again = read();\n" +
+                "            if (again && again.length > 0) {\n" +
+                "                console.log(`[TakeItemsAction] 第 ${attempt} 次读取容器才拿到内容（共 ${again.length} 项），已按新内容处理`);\n" +
+                "                return again;\n" +
+                "            }\n" +
+                "        }\n" +
+                "        if (process.env.DEBUG_MODE === 'true') console.log(`[TakeItemsAction] 容器读 3 次仍为空（slotCount=${win && win.slots ? win.slots.length : '?'}）`);\n" +
+                "        return items || [];\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：附魔名 -> 官方 id 映射（含中文别名），惰性构建一次\n" +
+                "    _bakabotEnchantMap() {\n" +
+                "        if (this.__bakabotEnchMap) return this.__bakabotEnchMap;\n" +
+                "        const map = { nameToId: {}, idToName: {} };\n" +
+                "        try {\n" +
+                "            const md = require('minecraft-data')(this.bot.version);\n" +
+                "            const byName = md.enchantmentsByName || {};\n" +
+                "            const byId = md.enchantmentsArray || md.enchantmentsById || md.enchantments || [];\n" +
+                "            const cn = {\n" +
+                "                '保护': 'protection', '火焰保护': 'fire_protection', '摔落保护': 'feather_falling',\n" +
+                "                '爆炸保护': 'blast_protection', '弹射物保护': 'projectile_protection', '水下呼吸': 'respiration',\n" +
+                "                '水下速掘': 'aqua_affinity', '荆棘': 'thorns', '深海探索者': 'depth_strider',\n" +
+                "                '冰霜行者': 'frost_walker', '灵魂疾行': 'soul_speed', '锋利': 'sharpness',\n" +
+                "                '亡灵杀手': 'smite', '节肢杀手': 'bane_of_arthropods', '击退': 'knockback',\n" +
+                "                '火焰附加': 'fire_aspect', '抢夺': 'looting', '横扫之刃': 'sweeping',\n" +
+                "                '效率': 'efficiency', '精准采集': 'silk_touch', '耐久': 'unbreaking',\n" +
+                "                '时运': 'fortune', '力量': 'power', '冲击': 'punch', '火矢': 'flame',\n" +
+                "                '无限': 'infinity', '海之眷顾': 'luck_of_the_sea', '饵钓': 'lure',\n" +
+                "                '经验修补': 'mending', '消失诅咒': 'vanishing_curse', '绑定诅咒': 'binding_curse',\n" +
+                "                '迅捷潜行': 'swift_sneak', '风之利刃': 'wind_burst', '密度': 'density',\n" +
+                "                '破甲': 'breach', '引雷': 'channeling', '忠诚': 'loyalty', '穿刺': 'impaling',\n" +
+                "                '激流': 'riptide', '多重射击': 'multishot', '穿透': 'piercing', '快速装填': 'quick_charge',\n" +
+                "            };\n" +
+                "            for (const [cnName, id] of Object.entries(cn)) map.nameToId[cnName] = id;\n" +
+                "            for (const id of Object.keys(byName)) {\n" +
+                "                const info = byName[id];\n" +
+                "                if (!info) continue;\n" +
+                "                map.nameToId[id] = id;\n" +
+                "                map.idToName[info.id] = id;\n" +
+                "                if (info.displayName) map.nameToId[String(info.displayName).toLowerCase()] = id;\n" +
+                "            }\n" +
+                "            if (Array.isArray(byId)) {\n" +
+                "                for (const info of byId) { if (info && info.name) map.idToName[info.id] = info.name; }\n" +
+                "            }\n" +
+                "        } catch (_) { /* 拿不到映射就退化成只按物品名匹配 */ }\n" +
+                "        this.__bakabotEnchMap = map;\n" +
+                "        return map;\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：解析请求里的附魔（'mending' / '经验修补' / '锋利5' / 'enchanted_book mending'）\n" +
+                "    _bakabotParseEnchant(name) {\n" +
+                "        if (!name) return null;\n" +
+                "        let s = String(name).toLowerCase().replace(/\\s+/g, '');\n" +
+                "        s = s.replace(/enchanted_book|附魔书|附魔/g, '');\n" +
+                "        if (!s) return null;\n" +
+                "        const map = this._bakabotEnchantMap();\n" +
+                "        if (!map || !map.nameToId) return null;\n" +
+                "        if (map.nameToId[s]) return { id: String(map.nameToId[s]), level: null };\n" +
+                "        const m = s.match(/^([a-z_]+|[\\u4e00-\\u9fa5]+)(\\d+)$/);\n" +
+                "        if (m && map.nameToId[m[1]]) return { id: String(map.nameToId[m[1]]), level: parseInt(m[2], 10) };\n" +
+                "        return null;\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：把附魔 id 统一成官方名字。\n" +
+                "    // 组件里存的是**数字 id**（实测附魔书：{\"id\":64,\"level\":1}），\n" +
+                "    // 数字 id 会随版本/协议转换变化，必须用 minecraft-data 的注册表翻回名字。\n" +
+                "    _bakabotResolveEnchantId(id) {\n" +
+                "        if (id == null) return null;\n" +
+                "        if (typeof id === 'string') return id.toLowerCase().replace(/^minecraft:/, '');\n" +
+                "        const map = this._bakabotEnchantMap();\n" +
+                "        if (map && map.idToName && map.idToName[id]) return String(map.idToName[id]).toLowerCase().replace(/^minecraft:/, '');\n" +
+                "        return null;\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：从「物品组件」读附魔（1.20.5+ 的真实来源）\n" +
+                "    //\n" +
+                "    // 实测结构（1.21.4 附魔书，经 ViaProxy 从 26.2 翻译）：\n" +
+                "    //   components = [ {\"type\":\"stored_enchantments\",\n" +
+                "    //                   \"data\":{\"enchantments\":[{\"id\":64,\"level\":1}],\"showInTooltip\":true}} ]\n" +
+                "    // 注意两点：\n" +
+                "    //   1) 附魔书用 stored_enchantments，普通装备用 enchantments —— 两个都要认；\n" +
+                "    //   2) prismarine-item 自带的 item.enchants getter 只查 'enchantments'，\n" +
+                "    //      对附魔书（stored_enchantments）会返回空数组，所以不能只靠它。\n" +
+                "    _bakabotEnchantsFromComponents(item) {\n" +
+                "        try {\n" +
+                "            if (!item) return null;\n" +
+                "            const out = [];\n" +
+                "            const take = (list) => {\n" +
+                "                if (!Array.isArray(list)) return;\n" +
+                "                for (const en of list) {\n" +
+                "                    if (!en) continue;\n" +
+                "                    const raw = en.id !== undefined ? en.id : en.name;\n" +
+                "                    const name = this._bakabotResolveEnchantId(raw);\n" +
+                "                    if (!name) continue;\n" +
+                "                    let lvl = en.level !== undefined ? en.level : en.lvl;\n" +
+                "                    if (typeof lvl !== 'number') lvl = parseInt(lvl, 10) || 1;\n" +
+                "                    out.push({ id: name, lvl: lvl });\n" +
+                "                }\n" +
+                "            };\n" +
+                "            // (a) components 数组（实测的形态）\n" +
+                "            if (Array.isArray(item.components)) {\n" +
+                "                for (const comp of item.components) {\n" +
+                "                    if (!comp || (comp.type !== 'stored_enchantments' && comp.type !== 'enchantments')) continue;\n" +
+                "                    take(comp.data && comp.data.enchantments);\n" +
+                "                }\n" +
+                "            }\n" +
+                "            // (b) componentMap（库内部用的形态，兜底）\n" +
+                "            if (out.length === 0 && item.componentMap && typeof item.componentMap.get === 'function') {\n" +
+                "                for (const key of ['stored_enchantments', 'enchantments']) {\n" +
+                "                    const c = item.componentMap.get(key);\n" +
+                "                    if (c && c.data) take(c.data.enchantments);\n" +
+                "                }\n" +
+                "            }\n" +
+                "            return out.length > 0 ? out : null;\n" +
+                "        } catch (e) {\n" +
+                "            if (process.env.DEBUG_MODE === 'true') console.log(`[TakeItemsAction] 读组件附魔失败: ${e.message}`);\n" +
+                "            return null;\n" +
+                "        }\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：读取物品附魔（统一出口，按可靠性依次尝试）\n" +
+                "    _bakabotEnchants(item) {\n" +
+                "        if (!item) return null;\n" +
+                "        // 1) 组件（1.20.5+ 的真实来源，优先）——能覆盖 item.enchants 漏掉的附魔书\n" +
+                "        const fromComp = this._bakabotEnchantsFromComponents(item);\n" +
+                "        if (fromComp) return fromComp;\n" +
+                "        // 2) 库自带 getter（普通装备的 enchantments 组件、旧版 NBT，它内部会归一化）\n" +
+                "        try {\n" +
+                "            const list = item.enchants;\n" +
+                "            if (Array.isArray(list) && list.length > 0) {\n" +
+                "                const out = [];\n" +
+                "                for (const en of list) {\n" +
+                "                    if (!en) continue;\n" +
+                "                    const name = this._bakabotResolveEnchantId(en.name !== undefined ? en.name : en.id);\n" +
+                "                    if (!name) continue;\n" +
+                "                    let lvl = en.lvl !== undefined ? en.lvl : en.level;\n" +
+                "                    if (typeof lvl !== 'number') lvl = parseInt(lvl, 10) || 1;\n" +
+                "                    out.push({ id: name, lvl: lvl });\n" +
+                "                }\n" +
+                "                if (out.length > 0) return out;\n" +
+                "            }\n" +
+                "        } catch (_) { /* 未知版本会抛错，交给下面的 NBT 兜底 */ }\n" +
+                "        return null;\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：读附魔书/装备的附魔（兼容旧 NBT 结构；组件交给 _bakabotEnchants）\n" +
+                "    _bakabotStoredEnchants(item) {\n" +
+                "        // 先走统一出口（覆盖组件与常规 NBT）\n" +
+                "        const viaGetter = this._bakabotEnchants(item);\n" +
+                "        if (viaGetter) return viaGetter;\n" +
+                "        // 兜底：直接解析原始 NBT 列表（老版本或 getter 不支持的形态）\n" +
+                "        try {\n" +
+                "            if (!item || !item.nbt) return null;\n" +
+                "            let root = item.nbt;\n" +
+                "            while (root && (root.nbt || root.parsed) && !(root.value && (root.value.StoredEnchantments || root.value.Enchantments || root.value.ench))) {\n" +
+                "                root = root.nbt || root.parsed;\n" +
+                "            }\n" +
+                "            const v = root && root.value;\n" +
+                "            const stored = v && (v.StoredEnchantments || v.Enchantments || v.ench);\n" +
+                "            if (!stored || !stored.value || !Array.isArray(stored.value.value)) return null;\n" +
+                "            const map = this._bakabotEnchantMap();\n" +
+                "            const out = [];\n" +
+                "            for (const en of stored.value.value) {\n" +
+                "                if (!en) continue;\n" +
+                "                const body = (en.type === 'compound' && en.value) ? en.value : en;\n" +
+                "                if (!body) continue;\n" +
+                "                let id = body.id ? (body.id.value !== undefined ? body.id.value : body.id) : null;\n" +
+                "                if (id == null) continue;\n" +
+                "                if (typeof id === 'number' && map && map.idToName[id]) id = map.idToName[id];\n" +
+                "                id = String(id).toLowerCase().replace(/^minecraft:/, '');\n" +
+                "                let lvlTag = body.lvl !== undefined ? body.lvl : body.level;\n" +
+                "                let lvl = lvlTag && lvlTag.value !== undefined ? lvlTag.value : lvlTag;\n" +
+                "                if (typeof lvl !== 'number') lvl = parseInt(lvl, 10) || 1;\n" +
+                "                out.push({ id: id, lvl: lvl });\n" +
+                "            }\n" +
+                "            return out.length > 0 ? out : null;\n" +
+                "        } catch (_) { return null; }\n" +
+                "    }\n" +
+                "\n" +
+                "    // " + marker + "：物品是否匹配请求名。支持三种写法：\n" +
+                "    //   物品名本身（如 gunpowder / 火药）\n" +
+                "    //   附魔名（如 mending / 经验修补）—— 匹配任意带该附魔的附魔书\n" +
+                "    //   'enchanted_book mending' / '锋利5' —— 指定附魔与等级\n" +
+                "    _bakabotItemMatches(item, name) {\n" +
+                "        if (!item || !name) return false;\n" +
+                "        const target = String(name).toLowerCase().trim();\n" +
+                "        const itemName = String(item.name || '').toLowerCase();\n" +
+                "        const itemDisplay = String(item.displayName || '').toLowerCase();\n" +
+                "        const ench = this._bakabotParseEnchant(target);\n" +
+                "        const plain = itemName === target || itemDisplay === target;\n" +
+                "        if (!ench) return plain;\n" +
+                "        // 请求的是附魔名（如 mending / 经验修补 / 锋利5）：按物品实际附魔匹配。\n" +
+                "        // 不限制必须是 enchanted_book —— 带该附魔的任何物品都算命中，\n" +
+                "        // 也避免因 name/displayName 取值差异而漏配。\n" +
+                "        const got = this._bakabotStoredEnchants(item);\n" +
+                "        if (got && got.length > 0) {\n" +
+                "            return got.some(en => String(en.id) === ench.id && (ench.level == null || en.lvl === ench.level));\n" +
+                "        }\n" +
+                "        // 读不到附魔时退回按名匹配（例如请求写成 'enchanted_book mending'）\n" +
+                "        return plain;\n" +
+                "    }\n" +
+                "    // ===== " + marker + " 辅助方法 END =====";
+            content = content.Replace("__BAKABOT_HELPER__", helper);
+        }
+
+        // 5) 收敛空白：剥离/注入会留下一两个多余空行，多次刷新会逐轮累积。
+        //    统一把 3 个以上连续换行压成 2 个（即最多留一个空行），使结果与刷新次数无关。
+        content = Regex.Replace(content, @"(\r?\n){3,}", "\n\n");
+
+        if (content != original)
+        {
+            File.WriteAllText(file, content, Encoding.UTF8);
+            Console.WriteLine($"[Patch] TakeItems 容器取物补丁已注入: {file}");
+        }
     }
 
     /// <summary>

@@ -67,6 +67,64 @@ public class ViaProxyService : IDisposable
     /// <summary>是否已配置至少一个正版账号（连接正版验证服务器必需）</summary>
     public bool HasMinecraftAccount => GetAccountCount() > 0;
 
+    /// <summary>已配置账号的显示信息（索引 + 微软账号名）</summary>
+    /// <param name="Index">在 saves.json accountsV4 数组中的下标，用作 --minecraft-account-index</param>
+    /// <param name="Name">账号的 Minecraft 名（minecraftProfile.name），读取失败时为占位文本</param>
+    public readonly record struct AccountInfo(int Index, string Name)
+    {
+        /// <summary>下拉框显示文本，例如 "1: fandada_F"</summary>
+        public string Display => $"{Index + 1}: {Name}";
+    }
+
+    /// <summary>
+    /// 枚举 saves.json 里已配置的微软正版账号（顺序即 accountsV4 顺序，与
+    /// --minecraft-account-index 的取值一一对应）。
+    /// </summary>
+    public List<AccountInfo> GetAccounts()
+    {
+        var result = new List<AccountInfo>();
+        try
+        {
+            if (!File.Exists(SavesJsonPath)) return result;
+            using var doc = JsonDocument.Parse(File.ReadAllText(SavesJsonPath));
+            if (!doc.RootElement.TryGetProperty("accountsV4", out var accounts) ||
+                accounts.ValueKind != JsonValueKind.Array)
+                return result;
+
+            var i = 0;
+            foreach (var acc in accounts.EnumerateArray())
+            {
+                var name = $"账号 {i + 1}";
+                if (acc.TryGetProperty("minecraftProfile", out var profile) &&
+                    profile.TryGetProperty("name", out var nameEl) &&
+                    nameEl.ValueKind == JsonValueKind.String)
+                {
+                    var read = nameEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(read)) name = read!;
+                }
+                result.Add(new AccountInfo(i, name));
+                i++;
+            }
+        }
+        catch { /* 文件损坏时视为未配置 */ }
+        return result;
+    }
+
+    /// <summary>取指定索引账号的 Minecraft 名；越界或读取失败返回 null</summary>
+    public string? GetAccountName(int index)
+    {
+        var accounts = GetAccounts();
+        return index >= 0 && index < accounts.Count ? accounts[index].Name : null;
+    }
+
+    /// <summary>把请求的账号索引夹到有效范围内（无账号时返回 0）</summary>
+    public int ClampAccountIndex(int requested)
+    {
+        var count = GetAccountCount();
+        if (count <= 0) return 0;
+        return requested < 0 ? 0 : (requested >= count ? count - 1 : requested);
+    }
+
     /// <summary>
     /// 打开 ViaProxy 自带的图形界面，供用户在 Accounts 页签添加/管理微软正版账号。
     /// GUI 关闭后账号会保存到 saves.json，之后 CLI 模式可用 --auth-method ACCOUNT 登录服务器。
@@ -105,6 +163,7 @@ public class ViaProxyService : IDisposable
     /// <param name="targetVersion">目标服务器 Minecraft 版本（如 "26.1"）</param>
     /// <param name="fakeAcceptResourcePacks">由代理自动接受服务器资源包（强制资源包服务器必需）</param>
     /// <param name="useAccountAuth">使用已配置的正版账号登录目标服务器（正版验证服务器必需）</param>
+    /// <param name="accountIndex">使用 saves.json 里第几个正版账号（0 起；此前写死为 0，多账号时会用错账号）</param>
     /// <param name="logAction">日志回调，用于把代理输出转发到实例控制台</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>机器人应连接的本地代理端口</returns>
@@ -115,6 +174,7 @@ public class ViaProxyService : IDisposable
         string targetVersion,
         bool fakeAcceptResourcePacks = false,
         bool useAccountAuth = false,
+        int accountIndex = 0,
         Action<string>? logAction = null,
         CancellationToken ct = default)
     {
@@ -146,6 +206,7 @@ public class ViaProxyService : IDisposable
         //   --target-version: 目标服务器版本（26.x 等，可用 --list-versions 查看）
         //   --auth-method NONE: 不由代理验证账号（适合离线模式服务器）
         //   --auth-method ACCOUNT: 使用 ViaProxy GUI 中配置的正版账号登录（正版验证服务器）
+        //   --minecraft-account-index N: 选用第 N 个账号（0 起，对应 saves.json 的 accountsV4 顺序）
         //   --proxy-online-mode false: 不强制客户端正版验证（默认即 false）
         //   --fake-accept-resource-packs true: 由代理自动接受服务器强制资源包
         var args = $"-jar \"{PathHelper.ViaProxyJarPath}\" cli" +
@@ -156,7 +217,15 @@ public class ViaProxyService : IDisposable
                    $" --proxy-online-mode false";
 
         if (useAccountAuth)
-            args += " --minecraft-account-index 0";
+        {
+            // 账号索引由设置里的「正版账号」选择决定，不再写死 0
+            var index = ClampAccountIndex(accountIndex);
+            args += $" --minecraft-account-index {index}";
+            var accountName = GetAccountName(index);
+            logAction?.Invoke(accountName != null
+                ? $"[ViaProxy] 使用第 {index + 1} 个正版账号登录：{accountName}"
+                : $"[ViaProxy] 使用第 {index + 1} 个正版账号登录");
+        }
         if (fakeAcceptResourcePacks)
             args += " --fake-accept-resource-packs true";
 
@@ -229,7 +298,8 @@ public class ViaProxyService : IDisposable
             _running.Remove(instanceName);
             throw new Exception(
                 $"ViaProxy 启动失败（退出码: {process.ExitCode}）。\n" +
-                "请检查日志输出，确认 Java 版本 ≥ 17 且 ViaProxy.jar 文件完整。");
+                "请检查日志输出，确认 Java 版本 ≥ 17 且 ViaProxy.jar 文件完整。\n" +
+                "若怀疑 JAR 损坏或版本过旧，可在「设置 → 协议代理」点「更新到最新版」重新下载。");
         }
 
         logAction?.Invoke($"[ViaProxy] 代理已就绪 → 机器人请连接 127.0.0.1:{localPort}");
