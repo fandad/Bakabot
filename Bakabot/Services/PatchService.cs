@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -365,6 +366,15 @@ module.exports = StrictAutoTeleportLogin;
         // 容器取物读取健壮性（等待 + 重试，避免误判容器为空）
         PatchTakeItems(srcDir);
 
+        // 任务连贯性诊断（CraftItem / DropItemAction 关键节点打印真实背包）
+        PatchTaskContinuityDiag(srcDir);
+
+        // 步骤间验真（CraftItem 产出校验 + DropItem 校验 + StateMachine 下一步前置条件校验）
+        PatchStepContinuity(srcDir);
+
+        // 协议解析错误洪泛修复（26.2 服务器粒子包读不了时不再刷爆日志/猝死）
+        PatchParseErrorFlood(srcDir);
+
         // utils/chat.js 的 /msg 私信模式支持（TELL_MODE=msg）
         PatchTellModeChatUtils(srcDir);
         PatchTpAcceptInstinct(srcDir);
@@ -418,6 +428,15 @@ module.exports = StrictAutoTeleportLogin;
 
         // 容器取物补丁同步刷新（幂等：先剥离本补丁各处注入，再无条件重新注入）
         PatchTakeItems(srcDir);
+
+        // 任务连贯性诊断同步刷新（幂等：先还原上游原样，再重新注入）
+        PatchTaskContinuityDiag(srcDir);
+
+        // 步骤间验真同步刷新（幂等）
+        PatchStepContinuity(srcDir);
+
+        // 协议解析错误洪泛修复同步刷新（幂等）
+        PatchParseErrorFlood(srcDir);
 
         // /msg 私信模式补丁同步刷新（幂等，已有标记则跳过）
         PatchTellModeChatUtils(srcDir);
@@ -1067,11 +1086,13 @@ module.exports = StrictAutoTeleportLogin;
             @"\r?\n[ \t]*// " + marker + @"：打印容器实况[\s\S]*?\r?\n[ \t]*console\.log\(.*?这个容器里没有目标物品.*?\);",
             "\n                        console.log(`[TakeItemsAction] 这个容器里没有目标物品，尝试下一个。`);");
 
+        // 1d3) 任务连贯性诊断的"剥离"在 PatchTaskContinuityDiag 里做（那是另外两个文件），
+        //      这里不处理，避免把不属于本文件的替换应用错对象。
+
         // 1e) 移除注入的 helper 方法块：用显式 START/END 边界，保证整块被吃掉
         content = Regex.Replace(content,
             @"[ \t]*// ===== __bakabot_takeitems_wait__ 辅助方法 START =====[\s\S]*?// ===== __bakabot_takeitems_wait__ 辅助方法 END =====[ \t]*\r?\n?",
             "");
-
         // 2) 注入（不设"是否已注入"的守卫：上面已把本补丁的每一处都剥离干净，
         //    所以这里对每一处都无条件重新注入；已注入形态匹配不到即天然跳过，保证幂等）
         {
@@ -1332,6 +1353,22 @@ module.exports = StrictAutoTeleportLogin;
                 "        // 读不到附魔时退回按名匹配（例如请求写成 'enchanted_book mending'）\n" +
                 "        return plain;\n" +
                 "    }\n" +
+                "\n" +
+                "    // " + marker + "：任务连贯性诊断 —— 打印当前真实背包 + 当前窗口状态\n" +
+                "    // 用途：定位\"上一步声称成功、下一步却拿不到东西\"（例如合成报成功但产物不在背包）。\n" +
+                "    // 只打印、不改行为，且仅 DEBUG_MODE=true 时输出。\n" +
+                "    async _bakabotDumpInv(tag) {\n" +
+                "        if (process.env.DEBUG_MODE !== 'true') return;\n" +
+                "        try {\n" +
+                "            const inv = this.bot.inventory.items();\n" +
+                "            const list = inv.map(i => `${i.name}x${i.count}`).join(', ') || '(空)';\n" +
+                "            const held = this.bot.heldItem ? `${this.bot.heldItem.name}x${this.bot.heldItem.count}` : '无';\n" +
+                "            const win = this.bot.currentWindow ? `${this.bot.currentWindow.type}(id=${this.bot.currentWindow.id})` : '无';\n" +
+                "            console.log(`[连贯性诊断][${tag}] 背包=${list} | 手持=${held} | 当前窗口=${win}`);\n" +
+                "        } catch (e) {\n" +
+                "            console.log(`[连贯性诊断][${tag}] 打印背包失败: ${e.message}`);\n" +
+                "        }\n" +
+                "    }\n" +
                 "    // ===== " + marker + " 辅助方法 END =====";
             content = content.Replace("__BAKABOT_HELPER__", helper);
         }
@@ -1345,6 +1382,551 @@ module.exports = StrictAutoTeleportLogin;
             File.WriteAllText(file, content, Encoding.UTF8);
             Console.WriteLine($"[Patch] TakeItems 容器取物补丁已注入: {file}");
         }
+    }
+
+    /// <summary>
+    /// 任务连贯性诊断补丁（CraftItem.js / DropItemAction.js）。
+    ///
+    /// 背景（2026-10-02 实测）：三步任务"取圆石 → 合成熔炉 → 丢给主人"会散架——
+    /// CraftItem 打印『成功合成 8 个 furnace』，但下一拍 DropItemAction 读到的背包是
+    /// `cobblestonex64, breadx24`，既没有熔炉、圆石也没被消耗，说明"成功"是假的。
+    /// 而 DropItemAction 在合成刚报错之后却能打印『成功丢弃了 8 个 furnace』，同样是假成功。
+    ///
+    /// 本补丁**只加诊断**（受 DEBUG_MODE 控制），不改任何行为，用来拿到"那一步之后背包到底长什么样"的实证，
+    /// 再据此做真正的连贯性修复。打印用的 `_bakabotDumpInv` helper 由 PatchTakeItems 注入。
+    ///
+    /// 幂等：注入前先把上一轮的调用形式还原成上游原样，再无条件重新注入；
+    /// 已还原/已注入两种形态各匹配其一，天然跳过。
+    /// </summary>
+    private static void PatchTaskContinuityDiag(string srcDir)
+    {
+        const string marker = "__bakabot_continuity__";
+        const string startMark = "// ===== __bakabot_dumpinv__ 辅助方法 START =====";
+        const string endMark = "// ===== __bakabot_dumpinv__ 辅助方法 END =====";
+
+        // ⚠️ 注入位置必须用**唯一的长上下文**做锚点，不能用
+        //    `if (!this.isExecuting) return;` 这种短句——它在 DropItemAction 里出现 5 次，
+        //    无差别 Replace 会把 5 处全替换掉，还在同步函数里插 await 直接把语法搞坏。
+        //
+        // 本补丁在这个方法上累计踩过 5 次坑，都记在这里，改之前务必读：
+        //   1) 把替换写进了 PatchTakeItems（那方法只读 TakeItems.js）→ 静默失效
+        //   2) helper 只注入 TakeItems.js，另两个文件调用不到 → "is not a function"
+        //   3) helper 插在 `this.bot = bot;` 之后 → 落进构造器内部，语法坏
+        //   4) 剥离 helper 时吃掉空行 → 下次锚点匹配不上
+        //   5) DropItemAction 的 dump 放进"背包没有该物品"失败分支 → 成功路径永不打印
+        //   6) 用短锚点 `if (!this.isExecuting) return;` → 一次替换 5 处，语法坏 + 删掉原日志
+        var craftFile = Path.Combine(srcDir, "actions", "craft", "CraftItem.js");
+        var dropFile = Path.Combine(srcDir, "actions", "basic", "DropItemAction.js");
+
+        // ---- CraftItem ----
+        if (File.Exists(craftFile))
+        {
+            // ⚠️ 关键：先把整个文件规范成 **LF** 再动手。
+            //    这套补丁栽在 CRLF 上已不止一次——文件本体是 CRLF，而 C# 里写字面 "\n" 的多行串
+            //    永远匹配不上，剥离就静默失效、于是每次注入一份新的，最终 const 重复声明、
+            //    机器人直接起不来（2026-10-02 14:00 的真实事故）。
+            //    统一成 LF 后，下面所有 IndexOf / Replace 都是确定的；写盘也用 LF。
+            var content = File.ReadAllText(craftFile, Encoding.UTF8).Replace("\r\n", "\n");
+            var original = content;
+
+            content = StripDumpHelper(content, startMark, endMark);
+
+            // CraftItem 的两处锚点本身就是唯一字符串，直接双向替换即可
+            const string craftOk = "console.log(`[CraftItem] 成功合成 ${this.count} 个 ${this.itemName}`);";
+            const string craftOkPatch = "await this._bakabotDumpInv('合成成功之后');";
+            const string craftErr = "console.error(`[CraftItem] 合成失败:`, err);";
+            const string craftErrPatch = "await this._bakabotDumpInv('合成失败之后');";
+
+            content = content.Replace(craftOkPatch, craftOk).Replace(craftOk, craftOkPatch);
+            content = content.Replace(craftErrPatch, craftErr).Replace(craftErr, craftErrPatch);
+
+            // ================= 任务连贯性修复（CraftItem）=================
+            // 实测证据（2026-10-02 12:21）：CraftItem 报「成功合成 8 个 furnace」，
+            // 2 秒后 DropItemAction 读到的背包却是 cobblestonex64, breadx24 —— 熔炉消失、圆石复原。
+            // 即：合成在客户端成功，被服务器**回滚**了。而原实现只要 bot.craft 不抛异常就报成功，
+            // 从不校验产物是否真在背包，于是假成功一路传给了下一步。
+            //
+            // 两处修复：
+            //   ① 产出校验：合成后确认产物真的进了背包，否则如实报失败（craft_not_verified）
+            //   ② 双窗口竞态：同一工作台被手工开一次、bot.craft 内部又开一次（日志 id=2/id=3），
+            //      改为只让 bot.craft 开窗
+            //
+            // 实现方式：全程**按行**操作（文件已规范成 LF）。
+            // 注入的每一行都带 marker，剥离时一句 RemoveAll 就够了——这是几轮踩坑后最稳的写法：
+            //   · 只删第一处 -> 重复注入 -> const 重复声明 -> 机器人起不来
+            //   · 把多行塞进一个列表元素 -> 下轮按行匹配不到 -> 留下孤儿 `}`
+            {
+                var lines = new List<string>(content.Split('\n'));
+
+                // 逐行剥离本补丁注入（带 marker 的行全部删除，包括②那条 bot.craft）
+                lines.RemoveAll(l => l.Contains(marker));
+
+                // ---- 注入 ①：产出校验（基线放在 recipeToUse 之前）----
+                var rIdx = lines.FindIndex(l => l.Contains("const recipeToUse = availableRecipes[0];"));
+                if (rIdx >= 0)
+                {
+                    var ind = lines[rIdx][..(lines[rIdx].Length - lines[rIdx].TrimStart().Length)];
+                    lines.Insert(rIdx, ind + "const __bakabotBefore = this._bakabotCountItem(this.itemName); // " + marker);
+                }
+                else Console.WriteLine($"[Patch] 警告：{craftFile} 未找到 recipeToUse 锚点");
+
+                // ---- 注入 ①b：校验块（放在 _craftWithTable 调用之后）----
+                var cIdx = lines.FindIndex(l => l.Contains("await this._craftWithTable(recipeToUse, this.count, tableBlock);"));
+                if (cIdx >= 0)
+                {
+                    var ind = lines[cIdx][..(lines[cIdx].Length - lines[cIdx].TrimStart().Length)];
+                    lines.InsertRange(cIdx + 1, new[]
+                    {
+                        ind + "const __bakabotAfter = this._bakabotCountItem(this.itemName); // " + marker,
+                        ind + "const __bakabotGot = __bakabotAfter - __bakabotBefore; // " + marker,
+                        ind + "if (__bakabotGot < this.count) { // " + marker,
+                        ind + "    console.log('[CraftItem] 产出校验未通过 —— 期望 ' + this.count + ' 个，实际只多了 ' + __bakabotGot + ' 个（合成前 ' + __bakabotBefore + '，合成后 ' + __bakabotAfter + '）。多半是服务器回滚了这次合成。'); // " + marker,
+                        ind + "    sendToOwner(this.bot, '⚠️ 合成【' + this.itemName + '】没有真正生效（期望 ' + this.count + ' 个，实际只多了 ' + __bakabotGot + ' 个），可能是服务器回滚了，我先停下。'); // " + marker,
+                        ind + "    if (this.craftingWindow) { this.bot.closeWindow(this.craftingWindow); this.craftingWindow = null; } // " + marker,
+                        ind + "    this.stop('craft_not_verified'); // " + marker,
+                        ind + "    return; // " + marker,
+                        ind + "} // " + marker
+                    });
+                }
+                else Console.WriteLine($"[Patch] 警告：{craftFile} 未找到 _craftWithTable 调用锚点");
+
+                content = string.Join("\n", lines);
+            }
+            // ⚠️ 顺序很重要：② 必须作用于 ① **join 之后**的 content，
+            //    否则 ① 的 join 会把 ② 对 content 的修改覆盖掉（用旧变量覆盖新串，踩过）。
+
+            // ---- 注入 ②：去掉手工开窗（交给 bot.craft 独占）----
+            // 先做一次（作用于原始 content），跑完 ① 之后再补一次（作用于 join 后的 content），
+            // 保证无论中间状态如何，最终都是"上游 4 行 → 单行带 marker"。
+            var upstreamBlock =
+                "        this.craftingWindow = await this._openCraftingTable(tableBlock);\n" +
+                "        if (!this.craftingWindow) {\n" +
+                "            throw new Error('无法打开工作台界面');\n" +
+                "        }\n" +
+                "\n" +
+                "        await this.bot.craft(recipe, count, tableBlock);";
+            var patchedLine = "        await this.bot.craft(recipe, count, tableBlock); // " + marker;
+            // ② 必须作用于 ① join **之后**的 content（顺序坑：否则 ① 的 join 会用旧变量覆盖掉它）
+            content = ApplyCraftWithTableFix(content, upstreamBlock, patchedLine);
+            if (!content.Contains(patchedLine))
+                Console.WriteLine($"[Patch] 警告：{craftFile} 双窗口修复未生效（_craftWithTable 锚点异常）");
+
+            content = InjectDumpHelper(content, startMark, endMark);
+            if (!content.Contains("async _bakabotDumpInv(tag)"))
+                Console.WriteLine($"[Patch] 警告：{craftFile} 构造器锚点未命中，诊断 helper 未注入");
+
+            content = Regex.Replace(content, @"(\r?\n){3,}", "\n\n");
+            if (content != original)
+            {
+                File.WriteAllText(craftFile, content, Encoding.UTF8);
+                Console.WriteLine($"[Patch] 任务连贯性诊断已注入: {craftFile}");
+                VerifyJsSyntax(craftFile);
+            }
+        }
+
+        // ---- DropItemAction ----
+        if (File.Exists(dropFile))
+        {
+            // 同样先规范成 LF（理由见 CraftItem 处）
+            var content = File.ReadAllText(dropFile, Encoding.UTF8).Replace("\r\n", "\n");
+            var original = content;
+
+            content = StripDumpHelper(content, startMark, endMark);
+
+            // ⚠️ 这些文件是 **CRLF**（连基础包原文件也是），所以多行匹配绝不能写字面 "`\n"，
+            //    必须用 \r?\n 的正则 —— 本补丁在这里栽过一次：单行锚点没问题，
+            //    一写多行就永远匹配不上，白跑一轮实测。
+            // 1) 失败分支：还原成上游原样（历史上这里被错塞过 dump 调用）
+            content = Regex.Replace(content,
+                @"([ \t]*sendToOwner\(this\.bot, `⚠️ 背包中没有【\$\{this\.itemName\}】，无法丢弃。`\);)[ \t]*\r?\n[ \t]*await this\._bakabotDumpInv\('丢完之后'\);[ \t]*\r?\n",
+                "$1\r\n" +
+                "                console.log(`[DropItemAction] 当前背包内容: ${this.bot.inventory.items().map(i => `${i.name}x${i.count}`).join(', ') || '(空)'}`);\r\n");
+
+            // 2) 成功路径：在 toss 循环结束（droppedTotal 计算之前）打印真实背包，
+            //    并**校验丢弃是否真的生效**（历史上出现过"报成功丢弃 8 个 furnace，实则背包里从来没有熔炉"）。
+            //    刻意**不用正则**：`[ \t]*` 会贪婪跨过换行，导致看似正确的模式永远匹配不上；
+            //    改成按行定位，确定性最强，也不受 CRLF/LF 影响。
+            {
+                // 先清掉上一轮的注入（按行、按标记），再重新插入。
+                // ⚠️ 不要依赖 `if (!this.isExecuting) return;` 做锚点——它出现多次，
+                //    且插入基线行后位置会漂移，导致第二轮报"未找到守卫"。
+                //    这里改成**以 droppedTotal 行为唯一锚点**：基线插在它之前，校验插在它之前。
+                var lines = new List<string>(content.Split('\n'));
+                // 剥离：凡是带本补丁 marker 的行一律删掉。
+                // ⚠️ 注入时必须**一行一个列表元素**，不能把多行塞进一个元素——
+                //    否则下一轮按行 RemoveAll 匹配不到块内那些行，会留下孤儿 `}`，
+                //    把文件搞成 "Missing catch or finally after try"（踩过）。
+                lines.RemoveAll(l => l.Contains(marker));
+
+                var idx = lines.FindIndex(l => l.Contains("const droppedTotal = "));
+                if (idx > 0)
+                {
+                    var indent = lines[idx][..(lines[idx].Length - lines[idx].TrimStart().Length)];
+                    var block = new List<string>
+                    {
+                        indent + "const __bakabotBeforeDrop = this._bakabotCountItem(resolvedName); // " + marker,
+                        indent + "const __bakabotAfterDrop = this._bakabotCountItem(resolvedName); // " + marker,
+                        indent + "const __bakabotActuallyDropped = __bakabotBeforeDrop - __bakabotAfterDrop; // " + marker,
+                        indent + "await this._bakabotDumpInv('丢完之后'); // " + marker,
+                        indent + "// 判据：数量没减少**且背包里还有该物品**才算失败。",
+                        indent + "// 实测教训：丢弃成功后 after=0，若写成 `__bakabotActuallyDropped === 0` 会把",
+                        indent + "// 每一次成功丢弃都误报成\"没生效\"（because before-after 也是 0）。",
+                        indent + "if (__bakabotActuallyDropped <= 0 && __bakabotAfterDrop > 0) { // " + marker,
+                        indent + "    console.log('[DropItemAction] 丢弃未生效 —— 报成功但背包里还有 ' + __bakabotAfterDrop + ' 个【' + resolvedName + '】，多半被服务器回滚。'); // " + marker,
+                        indent + "    sendToOwner(this.bot, '⚠️ 丢弃【' + resolvedName + '】好像没有真正生效（背包里还有 ' + __bakabotAfterDrop + ' 个），可能是服务器回滚了。'); // " + marker,
+                        indent + "    this.stop('drop_not_verified'); // " + marker,
+                        indent + "    return; // " + marker,
+                        indent + "} // " + marker
+                    };
+                    lines.InsertRange(idx, block);
+                }
+                else
+                {
+                    Console.WriteLine($"[Patch] 警告：{dropFile} 未找到 droppedTotal，丢弃后校验未注入");
+                }
+                content = string.Join("\n", lines);   // 保持 LF（见 CraftItem 处的说明）
+            }
+
+            content = InjectDumpHelper(content, startMark, endMark);
+            if (!content.Contains("async _bakabotDumpInv(tag)"))
+                Console.WriteLine($"[Patch] 警告：{dropFile} 构造器锚点未命中，诊断 helper 未注入");
+
+            // 3) 兜底：清掉任何残留的重复 dump 调用（历史上被短锚点一次替换 5 处过）
+            content = Regex.Replace(content,
+                @"([ \t]*)await this\._bakabotDumpInv\('丢完之后'\);[ \t]*\r?\n(?=[ \t]*await this\._bakabotDumpInv\('丢完之后'\);)",
+                "");
+
+            content = Regex.Replace(content, @"(\r?\n){3,}", "\n\n");
+            if (content != original)
+            {
+                File.WriteAllText(dropFile, content, Encoding.UTF8);
+                Console.WriteLine($"[Patch] 任务连贯性诊断已注入: {dropFile}");
+                VerifyJsSyntax(dropFile);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 步骤间「验真」补丁（StateMachine.js + ConditionParser.js）。
+    ///
+    /// 背景：这是用户反馈的「多步骤任务连贯性」问题的核心层。
+    /// 现状是——每个任务只由它自己的 Action 自测成败，**从没有人检查上一步的产物对下一步是否真的可用**：
+    ///   · 任务 2「合成8个熔炉」报成功（客户端成功、被服务器回滚）
+    ///   · 任务 3「丢给主人」接手时背包里没有熔炉 → no_item_in_inventory
+    /// 而 `SUPPRESS_ACTION_CHAT=true` 时失败还被静默吞掉，计划照常往下走，错误一路累积。
+    ///
+    /// 本补丁做两件事：
+    ///   ① ConditionParser 支持 `has_items` —— 提示词里 LLM 输出的就是 `condition: { "has_items": {...} }`，
+    ///      而原实现只认 `condition.items`，**导致先决条件检查一直静默失效**（格式错配）。
+    ///   ② StateMachine 在某步成功、进入下一步之前，先校验下一步的前置条件是否真的满足；
+    ///      不满足就打醒目日志 + 告知主人，并把后续任务交回计划重试（而不是继续硬跑）。
+    /// </summary>
+    private static void PatchStepContinuity(string srcDir)
+    {
+        const string marker = "__bakabot_step_continuity__";
+
+        // ---- ① ConditionParser 支持 has_items ----
+        var cpFile = Path.Combine(srcDir, "core", "ConditionParser.js");
+        if (File.Exists(cpFile))
+        {
+            var cp = File.ReadAllText(cpFile, Encoding.UTF8);
+            var cpOriginal = cp;
+
+            // 幂等：先还原，再注入。
+            // ⚠️ 用**按行定位**——这个文件是 CRLF，写字面 "\n" 的多行串永远匹配不上（本项目反复踩过）。
+            {
+                var lines = new List<string>(cp.Replace("\r\n", "\n").Split('\n'));
+                // 移除上一轮注入（含它自己的收尾 `}`，该 `}` 带标记以区别于文件原有结构）
+                lines.RemoveAll(l => l.Contains(marker) ||
+                                      l.Trim() == "if (condition.has_items) {" ||
+                                      l.Trim() == "this._validateItems(bot, condition.has_items, missing);");
+                var anchorIdx = lines.FindIndex(l => l.Contains("// 1. 校验消耗品 (items)"));
+                if (anchorIdx >= 0)
+                {
+                    var indent = lines[anchorIdx][..(lines[anchorIdx].Length - lines[anchorIdx].TrimStart().Length)];
+                    lines.InsertRange(anchorIdx + 1, new[]
+                    {
+                        indent + "// " + marker + "：提示词里 LLM 输出的是 has_items，原实现只认 items，",
+                        indent + "// 导致先决条件检查静默失效——两种写法都接受。",
+                        indent + "if (condition.has_items) {",
+                        indent + "    this._validateItems(bot, condition.has_items, missing);",
+                        indent + "} // " + marker + "_has_items_end"
+                    });
+                }
+                else
+                {
+                    Console.WriteLine($"[Patch] 警告：{cpFile} 未找到 items 校验锚点，has_items 支持未注入");
+                }
+                cp = string.Join("\n", lines);   // 保持 LF
+            }
+
+            if (cp != cpOriginal)
+            {
+                File.WriteAllText(cpFile, cp, Encoding.UTF8);
+                Console.WriteLine($"[Patch] 步骤间验真(ConditionParser)已注入: {cpFile}");
+                VerifyJsSyntax(cpFile);
+            }
+        }
+
+        // ---- ② StateMachine 步骤间校验下一步前置条件 ----
+        var smFile = Path.Combine(srcDir, "core", "StateMachine.js");
+        if (File.Exists(smFile))
+        {
+            var sm = File.ReadAllText(smFile, Encoding.UTF8);
+            var smOriginal = sm;
+
+            // 幂等：先移除上一轮注入块（显式边界）
+            sm = Regex.Replace(sm,
+                @"[ \t]*// " + marker + @" START[\s\S]*?// " + marker + @" END[ \t]*\r?\n?",
+                "");
+
+            // ⚠️ 位置很关键：**不能**在任务开始时检查"下一步"的前置条件——
+            //    那时本步还没执行，下一步当然不满足，会**每一步都必然误报**（实测踩过：
+            //    "取圆石"刚宣布开始就警告"制作熔炉 缺 cobblestone 64 个"，而随后取物是成功的）。
+            //    正确位置：**本步成功完成之后**，检查下一步现在是否真的具备条件。
+            const string doneAnchor =
+                "                        console.log(`[StateMachine] 【${todo.task_name}】已完成！`);";
+            if (sm.Contains(doneAnchor))
+            {
+                var block =
+                    "                        // " + marker + " START\n" +
+                    "                        // 步骤间验真：本步声称成功后，确认**下一步**的前置条件是否真的满足了。\n" +
+                    "                        // 不满足说明本步没有真正交付（例如合成被服务器回滚），后续任务必然连带失败。\n" +
+                    "                        try {\n" +
+                    "                            const __next = this.currentPlan.todo_list[this.currentIndex + 1];\n" +
+                    "                            if (__next && __next.condition && Object.keys(__next.condition).length > 0) {\n" +
+                    "                                const __miss = ConditionParser.evaluate(this.bot, __next.condition);\n" +
+                    "                                if (__miss.length > 0) {\n" +
+                    "                                    console.log(`[StateMachine] ⚠️ 连贯性警告：上一步【${todo.task_name}】声称完成，但下一步【${__next.task_name}】的条件仍未满足: ${__miss.join(', ')}`);\n" +
+                    "                                    console.log(`[StateMachine] ⚠️ 说明上一步没有真正交付，后续任务很可能连带失败。`);\n" +
+                    "                                    if (process.env.SUPPRESS_ACTION_CHAT !== 'true') {\n" +
+                    "                                        sendToOwner(this.bot, `⚠️ 上一步【${todo.task_name}】好像没真正完成，接下来要做【${__next.task_name}】还缺: ${__miss.join(', ')}。`);\n" +
+                    "                                    }\n" +
+                    "                                }\n" +
+                    "                            }\n" +
+                    "                        } catch (e) {\n" +
+                    "                            console.log(`[StateMachine] 步骤间验真出错（不影响执行）: ${e.message}`);\n" +
+                    "                        }\n" +
+                    "                        // " + marker + " END\n";
+                sm = sm.Replace(doneAnchor, doneAnchor + "\n" + block);
+            }
+            else
+            {
+                Console.WriteLine($"[Patch] 警告：{smFile} 未找到任务完成日志锚点，步骤间验真未注入");
+            }
+
+            sm = Regex.Replace(sm, @"(\r?\n){3,}", "\n\n");
+            if (sm != smOriginal)
+            {
+                File.WriteAllText(smFile, sm, Encoding.UTF8);
+                Console.WriteLine($"[Patch] 步骤间验真(StateMachine)已注入: {smFile}");
+                VerifyJsSyntax(smFile);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把 _craftWithTable 里的手工开窗段换成单行 bot.craft（消除双窗口竞态）。
+    /// **对称且自修复**：
+    ///   · 注入态（带 marker 的单行）→ 先还原成上游 4 行
+    ///   · 上游态 → 换成单行
+    ///   · 若方法体为空（历史上被剥离逻辑误删过）→ 直接把单行补回 `if (!tableBlock) {...}` 之后
+    /// </summary>
+    private static string ApplyCraftWithTableFix(string content, string upstreamBlock, string patchedLine)
+    {
+        content = content.Replace(patchedLine, upstreamBlock);   // 注入态 → 上游态
+        content = content.Replace(upstreamBlock, patchedLine);   // 上游态 → 注入态
+
+        if (content.Contains(patchedLine)) return content;
+
+        // 自修复：方法体空了，补回单行
+        var lines = new List<string>(content.Split('\n'));
+        var mIdx = lines.FindIndex(l => l.Contains("async _craftWithTable(recipe, count, tableBlock)"));
+        if (mIdx < 0) return content;
+
+        // 找到方法内 `if (!tableBlock) { ... }` 的收尾 `}`
+        var rIdx = lines.FindIndex(mIdx, l => l.Contains("await this.bot.craft(recipe, count, null);"));
+        if (rIdx < 0) return content;
+        var gIdx = lines.FindIndex(rIdx, l => l.Trim() == "}");
+        if (gIdx < 0) return content;
+
+        lines.InsertRange(gIdx + 1, new[] { "", patchedLine });
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// 「协议解析错误洪泛」修复（26.2 服务器 + ViaProxy 场景）。
+    ///
+    /// 实测（2026-10-02 14:08）：服务器升级到 26.2 后，ViaProxy 转出来的 `world_particles`
+    /// 用 mineflayer 的 1.21.4 解析器读不了，13 秒内产生 2463 次 PartialReadError，
+    /// 日志被刷到 2.9 MB，机器人随即猝死（退出码 -1）。
+    ///
+    /// 关键：**坏包本身不会让机器人崩**。protodef 的 `FullPacketParser._transform`
+    /// 对 `partialReadError` 已经 `return cb()` 静默跳过；真正致命的是它随后那行
+    /// `console.log(e.stack)`。而 minecraft-protocol 的 `createDeserializer` 本来就支持
+    /// `noErrorLogging`，由 `createBot` 的 `hideErrors` 选项透传。
+    ///
+    /// 兜底（按用户要求，防止真的错位）：`hideErrors` 只关日志，不改变"跳过坏包"的行为；
+    /// 帧层是长度前缀切包（`Splitter`），坏包天然隔离、不影响后续包。
+    /// 但仍然追加一个限流的 `uncaughtException` 处理器：万一出现真正的解析错位，
+    /// 记录后**不退出进程**，避免机器人猝死。
+    /// </summary>
+    private static void PatchParseErrorFlood(string srcDir)
+    {
+        // 三段各自独立的标记：解析错误洪泛修复曾因"两段共用同一个 marker"，
+        // 后一段的 RemoveAll 把前一段刚插入的行删掉，反复失败。**必须互不为子串**。
+        const string hideMark = "__bakabot_hideerr__";   // createBot 的 hideErrors 行
+        const string ueMark = "__bakabot_ue__";         // uncaughtException 兜底块
+
+        var file = Path.Combine(srcDir, "index.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+
+        var lines = new List<string>(content.Split('\n'));
+
+        // ---- 1) 剥离：两个标记**互不重叠**，用 Contains 一句全清 ----
+        // ⚠️ 不能用 EndsWith：hideErrors 那行的标记在**行中间**（后面还跟中文说明），
+        //    曾因此剥离失败、每轮重复注入一份 hideErrors（机器人起不来）。
+        lines.RemoveAll(l => l.Contains(hideMark, StringComparison.Ordinal) ||
+                             l.Contains(ueMark, StringComparison.Ordinal));
+
+        // ---- 2) 注入 A：createBot 选项加 hideErrors: true ----
+        //     放在所有注入的最前面，保证它在文件里的位置与 createBot 相邻
+        var cbIdx = lines.FindIndex(l => Regex.IsMatch(l, @"createBot\s*\(\s*\{"));
+        if (cbIdx >= 0)
+        {
+            var ind = new string(' ', lines[cbIdx].Length - lines[cbIdx].TrimStart().Length + 4);
+            lines.Insert(cbIdx + 1,
+                ind + "hideErrors: true, // " + hideMark + "：解析错误只跳过不刷屏（26.2 粒子包读不了会刷爆日志）");
+        }
+        else
+        {
+            Console.WriteLine($"[Patch] 警告：{file} 未找到 createBot 锚点，hideErrors 未注入");
+        }
+
+        // ---- 3) 注入 B：限流的 uncaughtException 兜底（真错位时记录但不猝死）----
+        var anchor = lines.FindIndex(l => l.Contains("process.on('unhandledRejection'"));
+        if (anchor >= 0)
+        {
+            var end = lines.FindIndex(anchor, l => l.Trim() == "});");
+            if (end >= 0)
+            {
+                var M = " // " + ueMark;
+                lines.InsertRange(end + 1, new[]
+                {
+                    "",
+                    "process.on('uncaughtException', (err) => {" + M,
+                    "    __bakabotUncaughtCount = (__bakabotUncaughtCount || 0) + 1;" + M,
+                    "    if (__bakabotUncaughtCount <= 5 || __bakabotUncaughtCount % 500 === 0) {" + M,
+                    "        console.error('[Bot] 未捕获异常(已忽略，防猝死) #' + __bakabotUncaughtCount + ':', (err && err.message) || err);" + M,
+                    "    }" + M,
+                    "});" + M
+                });
+            }
+            else Console.WriteLine($"[Patch] 警告：{file} 未找到 unhandledRejection 处理器结尾，兜底未注入");
+        }
+        else Console.WriteLine($"[Patch] 警告：{file} 未找到 unhandledRejection 锚点，兜底未注入");
+
+        content = string.Join("\n", lines);
+        content = Regex.Replace(content, @"(\r?\n){3,}", "\n\n");
+
+        if (content != original)
+        {
+            File.WriteAllText(file, content, Encoding.UTF8);
+            Console.WriteLine($"[Patch] 协议解析错误洪泛修复已注入: {file}");
+            VerifyJsSyntax(file);
+        }
+    }
+    /// <summary>剥离上一轮注入的 dump helper 块（显式边界，保留后面的分隔空行）</summary>
+    private static string StripDumpHelper(string content, string startMark, string endMark)
+    {
+        return Regex.Replace(content,
+            @"[ \t]*" + Regex.Escape(startMark) + @"[\s\S]*?" + Regex.Escape(endMark) + @"[ \t]*\r?\n",
+            "");
+    }
+
+    /// <summary>
+    /// 改完 JS 后立刻做语法自检（node --check）。
+    /// 本补丁曾两次把注入点写错导致语法坏掉，靠这个检查能当场发现而不是等用户实测。
+    /// 找不到 node 就跳过（不阻断补丁流程）。
+    /// </summary>
+    private static void VerifyJsSyntax(string file)
+    {
+        try
+        {
+            var node = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Bakabot", "runtime", "node.exe");
+            if (!File.Exists(node)) return;
+
+            var psi = new ProcessStartInfo(node)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            psi.ArgumentList.Add("--check");
+            psi.ArgumentList.Add(file);
+
+            using var p = Process.Start(psi);
+            if (p == null) return;
+            var err = p.StandardError.ReadToEnd();
+            p.WaitForExit(15000);
+
+            if (p.ExitCode != 0)
+                Console.WriteLine($"[Patch] ⚠️ 语法自检失败: {file}{Environment.NewLine}{err.Trim()}");
+        }
+        catch
+        {
+            // 自检本身不应该影响打补丁
+        }
+    }
+
+    /// <summary>
+    /// 把 dump helper 注入到「构造器闭合之后、首个类方法之前」。
+    /// 整块替换后立刻用 node --check 语法自检，避免再次把语法改坏。
+    /// </summary>
+    private static string InjectDumpHelper(string content, string startMark, string endMark)
+    {
+        var helper =
+            "    " + startMark + "\n" +
+            "    // 任务连贯性诊断：打印当前真实背包 + 手持 + 当前窗口状态。\n" +
+            "    // 只在 DEBUG_MODE=true 时输出，异常一律吞掉——诊断绝不能影响主流程。\n" +
+            "    async _bakabotDumpInv(tag) {\n" +
+            "        if (process.env.DEBUG_MODE !== 'true') return;\n" +
+            "        try {\n" +
+            "            const inv = this.bot.inventory.items();\n" +
+            "            const list = inv.map(i => `${i.name}x${i.count}`).join(', ') || '(空)';\n" +
+            "            const held = this.bot.heldItem ? `${this.bot.heldItem.name}x${this.bot.heldItem.count}` : '无';\n" +
+            "            const win = this.bot.currentWindow ? `${this.bot.currentWindow.type}(id=${this.bot.currentWindow.id})` : '无';\n" +
+            "            console.log(`[连贯性诊断][${tag}] 背包=${list} | 手持=${held} | 当前窗口=${win}`);\n" +
+            "        } catch (e) {\n" +
+            "            console.log(`[连贯性诊断][${tag}] 打印背包失败: ${e.message}`);\n" +
+            "        }\n" +
+            "    }\n" +
+            "    // 按名统计背包数量（产出校验用）。\n" +
+            "    // ⚠️ 这里刻意只做**精确名匹配**，不依赖 TakeItems.js 里的附魔匹配 helper：\n" +
+            "    //    helper 是逐文件注入的，CraftItem/DropItemAction 并不共享 TakeItems 的方法，\n" +
+            "    //    跨文件调用会抛 \"is not a function\"，反而让校验永远失败（踩过）。\n" +
+            "    _bakabotCountItem(name) {\n" +
+            "        try {\n" +
+            "            return this.bot.inventory.items()\n" +
+            "                .filter(i => i && i.name === name)\n" +
+            "                .reduce((s, i) => s + (i.count || 0), 0);\n" +
+            "        } catch (e) { return 0; }\n" +
+            "    }\n" +
+            "    " + endMark + "\n\n";
+
+        // 构造器闭合 -> 首个类方法之间的位置（用正则，容忍 1 个以上空行）
+        var ctorEndRe = new Regex(@"(\r?\n)[ \t]*\}[ \t]*(\r?\n)+([ \t]*async execute\(\) \{)");
+        if (!ctorEndRe.IsMatch(content))
+            return content;   // 由调用方负责告警
+
+        var escaped = helper.TrimEnd('\n').Replace("$", "$$");
+        return ctorEndRe.Replace(content, "$1    }$1$1" + escaped + "$1$1$3", 1);
     }
 
     /// <summary>
