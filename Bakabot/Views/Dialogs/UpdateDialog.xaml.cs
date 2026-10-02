@@ -1,202 +1,62 @@
 using System;
 using System.Diagnostics;
-using System.IO;
-using System.Net.Http;
-using System.Threading.Tasks;
 using System.Windows;
 using Bakabot.Models;
 
 namespace Bakabot.Views.Dialogs;
 
+/// <summary>
+/// 「发现新版本」提示窗。
+///
+/// 与旧版的区别：旧版会下载一个 .exe 并用批处理替换自身（那套流程来自 ARCbot 时代）。
+/// 本项目的发布产物是 **zip 包**（内含 exe + README + 基础包），自替换对 zip 无意义
+/// 且会破坏安装。因此现在只做两件事：展示更新说明、打开下载页由用户自行更新。
+/// </summary>
 public partial class UpdateDialog : Window
 {
-    // 对外暴露用户是否勾选了"不再提醒"
+    /// <summary>用户是否勾选了"跳过此版本"</summary>
     public bool IsSkipChecked => SkipCheckBox.IsChecked == true;
 
-    // 下载是否成功
-    public bool IsDownloadSuccessful { get; private set; }
-
     private readonly UpdateInfo _updateInfo;
-    private readonly HttpClient _httpClient;
 
     public UpdateDialog(UpdateInfo info)
     {
         InitializeComponent();
         _updateInfo = info;
         TitleText.Text = $"发现新版本：v{info.Version}";
-        ReleaseNotesBox.Text = info.ReleaseNotes;
-        _httpClient = new HttpClient();
+        ReleaseNotesBox.Text = string.IsNullOrWhiteSpace(info.ReleaseNotes)
+            ? "（本次发布没有填写更新说明，点「去下载」可查看发布页面）"
+            : info.ReleaseNotes;
     }
 
-    private async void Update_Click(object sender, RoutedEventArgs e)
+    private void Update_Click(object sender, RoutedEventArgs e)
     {
-        // 禁用按钮防止重复点击
-        UpdateButton.IsEnabled = false;
-        CancelButton.IsEnabled = false;
-        SkipCheckBox.IsEnabled = false;
+        var url = string.IsNullOrWhiteSpace(_updateInfo.DownloadUrl)
+            ? "https://github.com/fandad/Bakabot/releases/latest"
+            : _updateInfo.DownloadUrl;
 
-        // 显示进度条
-        DownloadProgressGrid.Visibility = Visibility.Visible;
-        DownloadStatusText.Text = "正在下载更新...";
-
-        // 开始下载
-        bool success = await DownloadUpdateAsync();
-
-        if (success)
-        {
-            DownloadStatusText.Text = "下载完成！正在安装...";
-            DownloadProgressBar.Value = 100;
-
-            // 安装更新
-            InstallUpdate();
-
-            // 返回 true 表示更新成功
-            IsDownloadSuccessful = true;
-            this.DialogResult = true;
-            this.Close();
-        }
-        else
-        {
-            DownloadStatusText.Text = "下载失败，请检查网络连接后重试。";
-            DownloadProgressBar.Foreground = System.Windows.Media.Brushes.Red;
-
-            // 重新启用按钮
-            UpdateButton.IsEnabled = true;
-            CancelButton.IsEnabled = true;
-            SkipCheckBox.IsEnabled = true;
-        }
-    }
-
-    private async Task<bool> DownloadUpdateAsync()
-    {
         try
         {
-            string tempPath = Path.Combine(Path.GetTempPath(), $"Bakabot_Update_{_updateInfo.Version}.exe");
-
-            using var response = await _httpClient.GetAsync(_updateInfo.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-
-            var totalBytes = response.Content.Headers.ContentLength ?? -1L;
-
-            await using var contentStream = await response.Content.ReadAsStreamAsync();
-            await using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
-
-            var buffer = new byte[81920];
-            long totalRead = 0;
-            int bytesRead;
-
-            while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
-            {
-                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
-                totalRead += bytesRead;
-
-                // 更新进度条
-                if (totalBytes > 0)
-                {
-                    double progress = (double)totalRead / totalBytes * 100;
-                    DownloadProgressBar.Value = progress;
-                    DownloadStatusText.Text = $"正在下载... {progress:F1}% ({FormatBytes(totalRead)} / {FormatBytes(totalBytes)})";
-                }
-                else
-                {
-                    DownloadStatusText.Text = $"正在下载... {FormatBytes(totalRead)}";
-                }
-
-                // 刷新UI
-                await Dispatcher.InvokeAsync(() => { });
-            }
-
-            // 保存下载的文件路径供安装使用
-            _downloadedFilePath = tempPath;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"下载失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-            return false;
-        }
-    }
-
-    private string _downloadedFilePath = string.Empty;
-
-    private void InstallUpdate()
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(_downloadedFilePath) || !File.Exists(_downloadedFilePath))
-            {
-                MessageBox.Show("安装文件不存在", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            // 创建批处理脚本来替换当前运行的EXE
-            string currentExePath = Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty;
-            if (string.IsNullOrEmpty(currentExePath))
-            {
-                MessageBox.Show("无法获取当前程序路径", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            string batchScript = $@"
-@echo off
-chcp 65001 >nul
-echo 正在安装更新...
-timeout /t 2 /nobreak >nul
-
-:retry
-del /f /q ""{currentExePath}"" 2>nul
-if exist ""{currentExePath}"" (
-    timeout /t 1 /nobreak >nul
-    goto retry
-)
-
-move /y ""{_downloadedFilePath}"" ""{currentExePath}""
-start "" ""{currentExePath}""
-del /f /q ""%~f0"" & exit
-";
-
-            string batchPath = Path.Combine(Path.GetTempPath(), "Bakabot_Updater.bat");
-            File.WriteAllText(batchPath, batchScript);
-
-            // 启动批处理脚本并关闭当前程序
             Process.Start(new ProcessStartInfo
             {
-                FileName = batchPath,
-                UseShellExecute = true,
-                CreateNoWindow = true
+                FileName = url,
+                UseShellExecute = true
             });
-
-            Application.Current.Shutdown();
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"安装失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"打开下载页失败：{ex.Message}\n\n请手动访问：\n{url}", "提示",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-    }
 
-    private string FormatBytes(long bytes)
-    {
-        string[] sizes = { "B", "KB", "MB", "GB" };
-        int order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-        return $"{size:F2} {sizes[order]}";
+        // 点了去下载就关掉，不再自动更新（由用户自行下载解压覆盖）
+        DialogResult = true;
+        Close();
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
-        // 返回 false 表示用户取消更新
-        this.DialogResult = false;
-        this.Close();
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        _httpClient?.Dispose();
-        base.OnClosed(e);
+        DialogResult = false;
+        Close();
     }
 }

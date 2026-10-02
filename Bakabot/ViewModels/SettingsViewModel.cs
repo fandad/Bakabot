@@ -156,7 +156,7 @@ public partial class SettingsViewModel : ObservableObject
     private string _mcpIpWhitelist = string.Empty;
 
     // ─── 关于 ───
-    public string AppVersion => "2.8.1";
+    public string AppVersion => "2.8.2";
     public string DotNetVersion => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
     public string AppDataPath => PathHelper.RootDir;
 

@@ -10,7 +10,6 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- 标题 -->
@@ -21,28 +20,18 @@
                  VerticalScrollBarVisibility="Auto" Margin="0,0,0,15" Padding="5"
                  Background="White" BorderBrush="#DDDDDD" Foreground="Black" />
         
-        <!-- 下载进度区域 -->
-        <Grid x:Name="DownloadProgressGrid" Grid.Row="2" Visibility="Collapsed" Margin="0,0,0,15">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-            <ProgressBar x:Name="DownloadProgressBar" Height="20" Minimum="0" Maximum="100" Value="0"/>
-            <TextBlock x:Name="DownloadStatusText" Grid.Row="1" Foreground="#666666" FontSize="12" Margin="0,5,0,0"/>
-        </Grid>
-        
         <!-- 不再提醒复选框 -->
-        <CheckBox x:Name="SkipCheckBox" Grid.Row="3" Foreground="Black" Margin="0,0,0,15">
+        <CheckBox x:Name="SkipCheckBox" Grid.Row="2" Foreground="Black" Margin="0,0,0,15">
             <TextBlock Text="跳过此版本（不再提醒）" Foreground="Black" />
         </CheckBox>
         
         <!-- 按钮 -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="CancelButton" Width="90" Height="30" Margin="0,0,10,0" 
                     Background="White" BorderBrush="#CCCCCC" Click="Cancel_Click">
                 <TextBlock Text="暂不更新" Foreground="Black" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Button>
-            <Button x:Name="UpdateButton" Content="立即更新" Width="90" Height="30" 
+            <Button x:Name="UpdateButton" Content="去下载" Width="90" Height="30" 
                     Background="{DynamicResource AccentBrush}" Foreground="White" BorderThickness="0" Click="Update_Click">
                 <Button.Style>
                     <Style TargetType="Button">

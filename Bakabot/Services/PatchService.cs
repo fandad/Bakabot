@@ -1003,14 +1003,31 @@ module.exports = StrictAutoTeleportLogin;
             "if (mode !== 'owner_only' && mode !== 'keyword_only' && mode !== 'owner_keyword') mode = 'hybrid'; // " + marker);
 
         // 2) 放行判定：owner_keyword = 主人 && 关键词
-        content = content.Replace(
-            "var allow = c.mode === 'owner_only' ? owner\n" +
-            "                : c.mode === 'keyword_only' ? trig\n" +
-            "                : (owner || trig);",
-            "var allow = c.mode === 'owner_only' ? owner\n" +
-            "                : c.mode === 'keyword_only' ? trig\n" +
-            "                : c.mode === 'owner_keyword' ? (owner && trig) // " + marker + "：主人且说了关键词\n" +
-            "                : (owner || trig);");
+        //
+        // ⚠️ 必须用换行无关的正则：这段话是**多行**的，而文件是 CRLF；
+        //    写字面 "\n" 的多行串**永远匹配不上**，于是白名单注入成功、判定这处静默失败，
+        //    结果 owner_keyword 落进 `(owner || trig)` 分支 = **等同于 hybrid**——
+        //    表现就是"主人说一次关键词之后不带关键词也回应"（2026-10-02 用户实测反馈）。
+        //    这个坑在本项目已反复出现，多行匹配一律用 \r?\n 或按行定位。
+        {
+            var reAllow = new Regex(
+                @"var allow = c\.mode === 'owner_only' \? owner\r?\n" +
+                @"([ \t]*): c\.mode === 'keyword_only' \? trig\r?\n" +
+                @"([ \t]*): \(owner \|\| trig\);");
+            if (reAllow.IsMatch(content))
+            {
+                content = reAllow.Replace(content,
+                    "var allow = c.mode === 'owner_only' ? owner\n" +
+                    "$1: c.mode === 'keyword_only' ? trig\n" +
+                    "$1: c.mode === 'owner_keyword' ? (owner && trig) // " + marker + "：主人且说了关键词\n" +
+                    "$2: (owner || trig);", 1);
+            }
+            else if (!content.Contains("c.mode === 'owner_keyword' ? (owner && trig)"))
+            {
+                // 既没有已注入的形态、又没有可注入的锚点 → 必须报错，不能静默
+                Console.WriteLine("[Patch] 警告：未找到 allow 判定锚点，owner_keyword 模式不会生效（会退化成 hybrid）");
+            }
+        }
 
         return content;
     }
