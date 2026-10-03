@@ -67,7 +67,7 @@ public class McpHostService
             options.ServerInfo = new Implementation
             {
                 Name = "Bakabot MCP",
-                Version = "2.8.2",
+                Version = "2.8.3",
             };
         })
         .WithHttpTransport(o => o.SessionMode = HttpServerSessionMode.Stateless)
@@ -108,7 +108,7 @@ public class McpHostService
             await next();
         });
 
-        app.MapGet("/healthz", () => Results.Json(new { ok = true, name = "Bakabot MCP", version = "2.8.2" }));
+        app.MapGet("/healthz", () => Results.Json(new { ok = true, name = "Bakabot MCP", version = "2.8.3" }));
         app.MapMcp("/mcp");
 
         try
@@ -161,7 +161,7 @@ public class McpHostService
             options.ServerInfo = new Implementation
             {
                 Name = "Bakabot MCP",
-                Version = "2.8.2",
+                Version = "2.8.3",
             };
         });
         // 用显式标准流而不是 StdioServerTransport：

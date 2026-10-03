@@ -358,6 +358,10 @@ module.exports = StrictAutoTeleportLogin;
                 File.Copy(indexJs, backupPath, overwrite: true);
 
             File.WriteAllText(indexJs, content, Encoding.UTF8);
+            // 写盘后立刻语法自检：注入逻辑出错时（曾把 const isOwner 注入成两份 →
+            // SyntaxError: Identifier 'xxx' has already been declared）必须当场报出来，
+            // 不能等到用户启动实例才发现机器人起不来
+            VerifyJsSyntax(indexJs);
         }
 
         // 行动文件（src/actions、plugins）的公屏播报门禁（由 SUPPRESS_ACTION_CHAT 开关控制）
@@ -422,6 +426,8 @@ module.exports = StrictAutoTeleportLogin;
             content = content.Replace(TakeItemsPromptAnchor, TakeItemsPromptAnchor + TakeItemsPromptSuffix);
 
         File.WriteAllText(indexJs, content, Encoding.UTF8);
+        // 写盘后立刻语法自检（同 PatchInstance：注入错漏必须当场暴露，别等用户启动才发现）
+        VerifyJsSyntax(indexJs);
 
         // 行动文件的公屏播报门禁同步刷新（内部自行先剥离旧注入再重新应用）
         PatchActionChatGate(srcDir);
@@ -665,6 +671,108 @@ module.exports = StrictAutoTeleportLogin;
     /// </summary>
     private string PatchChatTrigger(string content)
     {
+        // ⚠️ 先剥离本函数此前注入的所有内容，再无条件重新注入。
+        //    这一步是必须的：RepatchInstance 会先把「聊天触发补丁块」整块删掉，
+        //    而本函数对 index.js 正文的这几处改动**不在那个块里**（在 handleMessage 里、
+        //    以及模块顶部），所以块被删后旧注入会残留；若不先剥离，下一次注入就会**叠加**，
+        //    实测把 `const isOwner` 注入成两份 → SyntaxError（机器人起不来）。
+        //
+        //    顺序很讲究：必须**先把已注入的判定行还原成基础包原文**，让后面那段
+        //    「找到原文 → 替换」的正常路径来处理它。若直接把这行删掉，就再也没有可匹配的
+        //    原文了，反而会抛「既没有原文也没有标记」而卡死（这一步踩过两次）。
+        const string bcBaseOwnerLine =
+            "const isOwner = username.includes(process.env.MC_OWNER_NAME) || process.env.MC_OWNER_NAME.includes(username);";
+        // 还原本补丁的三行注入块 → 基础包原文。
+        // ⚠️ 必须用 [^\r\n]* 把**整行（含行尾注释）**吃掉，否则注释残留会让下一行匹配不上，
+        //    结果留下孤儿 `const isOwner` → 重复声明（这里踩过）。
+        content = Regex.Replace(content,
+            @"[ \t]*const __bcOwnerNames = [^\r\n]*\r?\n[ \t]*__bcOwnerNames\.push\('__bakabot_qq_user__'\);[^\r\n]*\r?\n[ \t]*const isOwner = [^\r\n]*\r?\n?",
+            "    " + bcBaseOwnerLine + "\r\n");
+        // 模块顶部缓存的原始名单行、以及自检闸门行：直接删（它们会被无条件重新注入）
+        content = Regex.Replace(content, @"[^\r\n]*global\.__bcQQOwners = [^\r\n]*\r?\n?", "");
+        content = content.Replace(
+            "if (username === bot.username && !global.__bakabotQQDispatching) return; // __bakabot_qq_selfcheck__",
+            "if (username === bot.username) return;");
+        content = Regex.Replace(content, @"[^\r\n]*__bakabot_qq_selfcheck__[^\r\n]*\r?\n?", "");
+
+        // ── 0) QQ 转达的指令：修掉「绑定名撞机器人游戏名 → 被静默丢弃」──
+        //
+        // 背景（2026-10-02 实测）：基础包 handleMessage 第一道门是
+        //     if (username === bot.username) return;      // 忽略机器人自己发的消息
+        // 而 QQ 桥接是把**白名单里的绑定玩家名**当说话人传进来的。于是当某个 QQ 号绑定的
+        // PlayerName 恰好等于机器人自己的游戏名时，该号的所有 QQ 指令都被这句自检丢掉：
+        // 日志里只有 [QQ] 收到指令来自 X 与 [Debug] 收到消息来自 X，之后什么都没有、也不报错。
+        //
+        // 修法（两层，互补）：
+        // ① **说话人改用不会撞名的内部标记**（见下面 __BC_QQ_MARK 的注释）——
+        //    从根上消除名字碰撞，绑定名写成什么都不影响；
+        // ② 自检处补一个「本次确实是 QQ 派发中」的闸门，双保险。
+        //    该闸门由 QQ 桥接在 __deliverQQ 里同步置位；handleMessage 从入口到这句自检
+        //    之间**没有任何 await**，所以 async 消息监听器不会在窗口内插进来。
+        const string bcSelfCheck = "if (username === bot.username) return;";
+        if (content.Contains(bcSelfCheck))
+        {
+            content = content.Replace(bcSelfCheck,
+                "if (username === bot.username && !global.__bakabotQQDispatching) return; // __bakabot_qq_selfcheck__");
+        }
+
+        // ── 0b) 主人名单「源」：必须在被本补丁规范化之前先抓一份 ──
+        //
+        // ⚠️ 这里踩过一个真坑（2026-10-02）：PatchChatTrigger 底部会调用
+        //     __normalizeOwnerEnv() → process.env.MC_OWNER_NAME = 名单里的【第一个】主人，
+        //    因为基础包只认单一主人名。于是 handleMessage 里读 process.env.MC_OWNER_NAME
+        //    时，**多主人名单已经被压成第一个了**。
+        //    旧的「双向子串」比较碰巧还能放过其余主人（如 "Cold_" 命中 "Cold_Fan"），
+        //    换成精确匹配后就暴露了：除第一位主人外，**其余主人全被误拒**（实测
+        //    owners=["cold_fan"]、Yan_wan/w0nderfu_11 都进不去 LLM）。
+        // 修法：在补丁最顶部（早于 __normalizeOwnerEnv）把原始名单缓存到一个全局里，
+        //       主人判定优先用它。
+        const string bcOwnerSrcLine = "(function () { try { global.__bcQQOwners = (process.env.MC_OWNER_NAME || '').split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean); } catch (e) { global.__bcQQOwners = []; } })(); // __bakabot_owner_exact__";
+        {
+            // 目标：在【模块最顶部】抓一份原始主人名单，早于 PatchChatTrigger 自己的
+            // __normalizeOwnerEnv()（它会把 MC_OWNER_NAME 压成第一位主人，导致其余主人被误拒）。
+            // ⚠️ 不能用聊天触发补丁块做锚点：RepatchInstance 会先把这个块整块剥离再重新注入，
+            //    所以本函数拿到的 content 里根本没有 __state / __bakabot_chat_trigger__（实测
+            //    chat_trigger=False），用那个锚点会一直抛错。
+            // 剥离已在函数开头统一做过，这里直接 prepend，天然幂等。
+            content = bcOwnerSrcLine + "\n" + content;
+        }
+
+        // ── 1) 主人判定：把「子串比较」换成「按逗号名单精确匹配」──
+        //
+        // 基础包原文（index.js）：
+        //   const isOwner = username.includes(process.env.MC_OWNER_NAME) || process.env.MC_OWNER_NAME.includes(username);
+        // 这是**双向子串**比较，多主人名单下会误判，实测：
+        //   · 名单「Cold_Fan,OoTomorioO,Yan_wan,w0nderfu_11」时，「0nderfu」/「Cold」/「dada_F」
+        //     这类**部分名**会被判成主人；
+        //   · 单主人「Cold_」时，「Cold_Fan」（另一个人）也会被判成主人。
+        // 而基础包自己的 __isOwnerName() 一直是**精确**比较，说明精确才是本意，这里是历史缺陷。
+        // 本补丁把该表达式换成等价语义的精确匹配（大小写不敏感 + 去空格），并把下面那个
+        // 「QQ 转达」用的内部标记也一并算作可用主体（它就是本补丁自己注入的常量）。
+        //
+        // 幂等：基础里含有旧写法时才替换（RefreshPatches 若从 zip 重新同步了基础文件，
+        // 旧写法会回来，这里会再替换一次）；已替换过的形态匹配不到，天然跳过。
+        const string bcOldOwner =
+            "const isOwner = username.includes(process.env.MC_OWNER_NAME) || process.env.MC_OWNER_NAME.includes(username);";
+        // 注入后的正确形态（已经过上面的剥离，这里只会是新注入或基础包原样两种情形）
+        const string bcPrepared = "global.__bcQQOwners.slice()";
+        const string bcNewBlock =
+            "const __bcOwnerNames = ((global.__bcQQOwners && global.__bcQQOwners.length) ? global.__bcQQOwners.slice()" +
+            " : String(process.env.MC_OWNER_NAME || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)); // __bakabot_owner_exact__\r\n" +
+            "    __bcOwnerNames.push('__bakabot_qq_user__'); // __bakabot_owner_exact__：QQ 转达指令的内部说话人标记，同样放行\r\n" +
+            "    const isOwner = __bcOwnerNames.indexOf(String(username == null ? '' : username).trim().toLowerCase()) !== -1; // __bakabot_owner_exact__";
+
+        if (content.Contains(bcOldOwner))
+        {
+            content = content.Replace(bcOldOwner, bcNewBlock);
+        }
+        else if (!content.Contains(bcPrepared))
+        {
+            // 既不是基础包原样、也还没注入过 → 属于预期外的形态，宁可报错也不静默跳过
+            throw new InvalidOperationException(
+                "PatchChatTrigger: 主人判定处既没有基础包原文、也没有本补丁注入标记，无法安全补丁（拒绝静默跳过）");
+        }
+
         if (content.Contains("__bakabot_chat_trigger__"))
             return content;
 
@@ -2230,8 +2338,21 @@ module.exports = StrictAutoTeleportLogin;
         }
         if (!hit) return false;
 
-        // 通道判断：QQ 会话通道激活 = QQ 触发，否则视为游戏内触发
-        var ch = global.__bakabotQQ && global.__bakabotQQ.active ? global.__bakabotQQ : null;
+        // 通道判断：**按本次指令的来源快照**判定，不能读活动通道 __bakabotQQ。
+        // ⚠️ 这里踩过一个用户可见的 bug（2026-10-03）：QQ 会话结束后 __bakabotQQ 会一直残留，
+        //    直到「下一条会被处理的游戏指令」把它清掉。旧代码只看 __bakabotQQ，
+        //    于是 QQ 说过话之后，**游戏里第一条命令提示词的回执会被错判成 QQ 来源、发到 QQ**，
+        //    在游戏里再说一句才恢复正常（正是用户报的「说一句之后又回来了」）。
+        // 归属优先级：
+        //   ① global.__bakabotQQByGame === true  → 当前这条指令就是游戏内的（QQ 桥接在
+        //      「确实会处理该游戏指令」时置位；比残留的活动通道更可信）
+        //   ② __bakabotQQTurn（本次指令快照）
+        //   ③ __bakabotQQ（活动通道，兜底）
+        var ch = global.__bakabotQQByGame
+          ? null
+          : ((global.__bakabotQQTurn && global.__bakabotQQTurn.active)
+            ? global.__bakabotQQTurn
+            : ((global.__bakabotQQ && global.__bakabotQQ.active) ? global.__bakabotQQ : null));
         if (ch) {
           // QQ 屏蔽：命中即吞掉消息（不执行、不思考）
           if (cfg.blockQq) { console.log('[QuickCmd] QQ 屏蔽，吞掉消息'); return true; }
@@ -2244,9 +2365,11 @@ module.exports = StrictAutoTeleportLogin;
 
         // 命令始终发往游戏执行：临时让 QQ 桥接放行（避免非 / 开头的内容被转到 QQ）
         var savedCh = global.__bakabotQQ;
+        var savedTurn = global.__bakabotQQTurn;
         global.__bakabotQQ = null;
+        global.__bakabotQQTurn = null;
         try { bot.chat(cmd); } catch (e) { console.log('[QuickCmd] 执行失败: ' + e.message); return false; }
-        finally { global.__bakabotQQ = savedCh; }
+        finally { global.__bakabotQQ = savedCh; global.__bakabotQQTurn = savedTurn; }
 
         console.log('[QuickCmd] 关键词【' + hit.keyword + '】→ 执行 ' + cmd);
 
@@ -2298,7 +2421,48 @@ module.exports = StrictAutoTeleportLogin;
     global.__bakabotQQ = null;
     // 当前指令的回复通道兜底：处理期间即使被杂项事件误切通道，回复仍发回 QQ
     global.__bakabotQQReply = null;
+    // 【本次指令的回复通道快照】。与上面的「当前通道」分开：
+    // QQ 回复是异步生成的（要等 LLM），而「当前通道」会被游戏内事件随时翻转，
+    // 若回复落地时读的是当时的全局状态，就会按游戏通道走 → 漏进服务器公聊。
+    // 详见 PatchQQBridgeV2 的说明与 __bakabotGameWillRun。
+    global.__bakabotQQTurn = null;
     global.__bakabotQQBot = null;
+    // 归属标记：true = 当前这条指令来自游戏内（由 emit 包装在「确实会处理该游戏指令」时置位）
+    global.__bakabotQQByGame = false;
+
+    // ── 通道判定辅助（输出分流与事件判定共用）──
+    // 说话人是否算「主人」之一：按逗号名单**精确**比较（大小写不敏感 + 去空格）。
+    // 注意不能用子串比较：多主人名单下「0nderfu」会命中「w0nderfu_11」，
+    // 单主人「Cold_」会命中另一个人「Cold_Fan」（基础包原文正是双向子串比较，属历史缺陷）。
+    function __bakabotSameUsers(name) {
+      var n = String(name || '').trim().toLowerCase();
+      if (!n) return false;
+      var names = String(process.env.MC_OWNER_NAME || '')
+        .split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+      return names.indexOf(n) !== -1;
+    }
+    // 这条游戏内消息【会不会真的被基座处理】？
+    // 基座 handleMessage 有多道门：机器人自己发的、非主人、空消息，以及 isThinking 并发锁。
+    // 尤其 isThinking：机器人正在回答 QQ 指令时，游戏内消息会被【直接丢弃】，
+    // 此时切通道毫无意义，只会把 QQ 的回复赶到游戏里。
+    function __bakabotGameWillRun(name, text) {
+      // isThinking 是基座 index.js 模块作用域的 let，与本补丁同模块，可直接读
+      if (typeof isThinking !== 'undefined' && isThinking) return false;
+      var me = global.__bakabotQQBot && global.__bakabotQQBot.username;
+      if (me && String(name || '') === String(me)) return false;
+      if (!__bakabotSameUsers(name)) return false;
+      if (text !== undefined && text !== null && String(text) === '') return false;
+      return true;
+    }
+    // 当前该走哪个通道：优先【本次指令的快照】，其次「当前通道」
+    // __bakabotQQByGame：一旦处理过一条游戏内指令就置位，表示「当前这条指令来自游戏」。
+    // 它让输出分流与 QuickCmd 的归属判定不再被残留的活动通道带偏（见 PatchQuickCommands 注释）。
+    function __bakabotCh() {
+      if (global.__bakabotQQByGame) return null;
+      if (global.__bakabotQQTurn && global.__bakabotQQTurn.active) return global.__bakabotQQTurn;
+      if (global.__bakabotQQ && global.__bakabotQQ.active) return global.__bakabotQQ;
+      return null;
+    }
     global.__bakabotQQReady = false;
     global.__bakabotQQAIMsg = false;
     // 按 QQ 号分开记会话历史（每人一份，最多 10 条）
@@ -2349,6 +2513,9 @@ module.exports = StrictAutoTeleportLogin;
       var player = String(msg.player || '').trim();
       if (!qq) return;
       global.__bakabotQQ = { active: true, qq: qq, groupId: groupId, player: player || null };
+      global.__bakabotQQTurn = global.__bakabotQQ; // 本次指令的回复通道快照
+      // 这条指令来自 QQ：清掉「来自游戏」的归属标记（见 __bakabotCh 的说明）
+      global.__bakabotQQByGame = false;
       // stop 类指令顺带清掉该 QQ 的会话历史（基座同时会清全局历史）
       if (String(msg.text).trim() === 'stop') global.__bakabotQQHist[qq] = [];
       global.__bakabotQQAIMsg = false;
@@ -2368,7 +2535,22 @@ module.exports = StrictAutoTeleportLogin;
         console.log('[QQ] 收到指令来自 ' + speaker + ': ' + text);
         // 兜底记录本次指令的回复通道，防止处理期间被系统消息等杂项事件切走
         global.__bakabotQQReply = global.__bakabotQQ;
-        var __p = handleMessage(speaker, text);
+        // ⚠️ 说话人改用**不会撞名的内部标记**传给基座，而不是直接用绑定玩家名。
+        //
+        // 原因（2026-10-02 实测）：基座 handleMessage 会用
+        //     if (username === bot.username) return;      // 忽略机器人自己发的消息
+        // 把「说话人 == 机器人游戏名」的消息丢掉。而绑定玩家名是用户在白名单里填的，
+        // 一旦填成机器人自己的游戏名，该 QQ 号的所有指令就被静默丢弃（不思考、不报错）。
+        // 传一个固定标记就与绑定名无关了；标记同时被加进「可用主体」名单，
+        // 因此能通过下面的主人判定（见 PatchChatTrigger 里 __bcOwnerNames.push(...)）。
+        //
+        // 注意：这里只在**传给 handleMessage 的参数**上替换；process.env.MC_OWNER_NAME
+        // 仍是真实绑定名，所以动作/私聊收件人/提示词都不受影响。
+        var __BQ_MARK = '__bakabot_qq_user__';
+        // 闸门：本次确实是 QQ 派发中（基座入口到那句自检之间没有 await，见 PatchChatTrigger 说明）
+        global.__bakabotQQDispatching = true;
+        var __p = handleMessage(__BQ_MARK, text);
+        global.__bakabotQQDispatching = false;
         if (__p && typeof __p.catch === 'function') __p.catch(function(e){ console.log('[QQ] 指令处理异常: ' + (e && e.message)); });
       } catch(e) {
         console.log('[QQ] 指令处理失败: ' + (e && e.message));
@@ -2382,9 +2564,9 @@ module.exports = StrictAutoTeleportLogin;
       var __origSTO = __chatUtils.sendToOwner;
       __chatUtils.sendToOwner = function(bot, message) {
         var s = String(message == null ? '' : message);
-        var ch = global.__bakabotQQ && global.__bakabotQQ.active
-          ? global.__bakabotQQ
-          : (global.__bakabotQQReply || null);
+        // 读「本次指令的快照」而非当时的全局通道：避免 QQ 的异步回复落地时
+        // 已被游戏内事件把通道翻转成游戏，从而漏进服务器公聊（本轮修复的根因）
+        var ch = __bakabotCh();
         if (ch && ch.active) {
           if (s.indexOf('/tell ') === 0 || s.indexOf('/msg ') === 0) {
             var parts = s.split(' ');
@@ -2465,9 +2647,8 @@ module.exports = StrictAutoTeleportLogin;
           var __origChat = __bot.chat.bind(__bot);
           __bot.chat = function(message) {
             var s = String(message == null ? '' : message);
-            var ch = global.__bakabotQQ && global.__bakabotQQ.active
-              ? global.__bakabotQQ
-              : (global.__bakabotQQReply || null);
+            // 同 sendToOwner：优先读本次指令的快照，避免异步回复被翻转的全局通道带偏
+            var ch = __bakabotCh();
             if (ch && ch.active) {
               if (s.indexOf('/tell ') === 0 || s.indexOf('/msg ') === 0) {
                 var parts = s.split(' ');
@@ -2486,36 +2667,43 @@ module.exports = StrictAutoTeleportLogin;
           __bot.emit = function(eventName) {
             var ch = global.__bakabotQQ;
             if (ch && ch.active && (eventName === 'chat' || eventName === 'messagestr')) {
-              var args = Array.prototype.slice.call(arguments, 1);
-              var isSelf = false;
-              var isCommand = false;
-              if (eventName === 'chat') {
-                // 公屏聊天：别人发言算游戏指令；机器人自己的回显不算
-                var who = args[0];
-                isSelf = who && __bot.username && String(who).toLowerCase() === String(__bot.username).toLowerCase();
-                isCommand = !isSelf && !!who;
-              } else {
-                var s = String(args[0] || '');
-                // 只把“玩家发来的私信”当作游戏指令切回游戏通道；
-                // 系统/行动反馈等普通 messagestr（传送反馈、公告等）不再切走 QQ 回复通道，
-                // 避免 QQ 指令处理中途被服务器消息打断后，回复发到游戏私聊
-                if (/whispers to you:|悄悄地对你说/.test(s)) {
-                  isCommand = true;
+                var args = Array.prototype.slice.call(arguments, 1);
+                var isSelf = false;
+                var isCommand = false;
+                if (eventName === 'chat') {
+                  // 公屏聊天：别人发言算游戏指令；机器人自己的回显不算
+                  var who = args[0];
+                  isSelf = who && __bot.username && String(who).toLowerCase() === String(__bot.username).toLowerCase();
+                  isCommand = !isSelf && !!who;
                 } else {
-                  var m = s.match(/^\[([a-zA-Z0-9_]+)\s*(?:[\u2190-\u21FF\u2794-\u27BE]|->|~)\s*[^\]]*\]/);
-                  if (m) {
-                    isSelf = __bot.username && String(m[1]).toLowerCase() === String(__bot.username).toLowerCase();
-                    isCommand = !isSelf;
+                  var s = String(args[0] || '');
+                  // 只把“玩家发来的私信”当作游戏指令切回游戏通道；
+                  // 系统/行动反馈等普通 messagestr（传送反馈、公告等）不再切走 QQ 回复通道，
+                  // 避免 QQ 指令处理中途被服务器消息打断后，回复发到游戏私聊
+                  if (/whispers to you:|悄悄地对你说/.test(s)) {
+                    isCommand = true;
+                  } else {
+                    var m = s.match(/^\[([a-zA-Z0-9_]+)\s*(?:[\u2190-\u21FF\u2794-\u27BE]|->|~)\s*[^\]]*\]/);
+                    if (m) {
+                      isSelf = __bot.username && String(m[1]).toLowerCase() === String(__bot.username).toLowerCase();
+                      isCommand = !isSelf;
+                    }
                   }
                 }
+                if (isCommand && __bakabotGameWillRun(args[0], args[1])) {
+                  // 真正的游戏指令到来：切回游戏通道，同时清掉 QQ 回复兜底与本次快照。
+                  // ⚠️ 只有这条消息【真的会被基座处理】时才切：机器人正在回答 QQ 指令时
+                  //（isThinking 锁）游戏内消息会被丢弃，若这里照样切通道，
+                  // QQ 的异步回复落地时就按游戏通道走 → 漏进服务器公聊（本轮修的 bug）。
+                  global.__bakabotQQ = null;
+                  global.__bakabotQQReply = null;
+                  global.__bakabotQQTurn = null;
+                  // 归属标记：后续判定（输出分流、QuickCmd）据此认定「当前指令来自游戏」，
+                  // 不会再被残留的活动通道带偏。下一条 QQ 指令派发时会清掉它。
+                  global.__bakabotQQByGame = true;
+                }
               }
-              if (isCommand) {
-                // 真正的游戏指令到来：切回游戏通道，同时清掉 QQ 回复兜底
-                global.__bakabotQQ = null;
-                global.__bakabotQQReply = null;
-              }
-            }
-            return __origEmit.apply(__bot, arguments);
+              return __origEmit.apply(__bot, arguments);
           };
         } catch(e) {}
         return __bot;
