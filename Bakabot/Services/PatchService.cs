@@ -833,14 +833,229 @@ module.exports = StrictAutoTeleportLogin;
       if (__self && m[1].toLowerCase() === String(__self).toLowerCase()) return null;
       return { speaker: m[1], msg: m[2] };
     }
+
+    // ── 公屏兼容解析（TrChat / 其它""把玩家聊天发成系统消息""的插件服）──
+    //
+    // 背景（2026-10-21 查 TrChat v2 源码确认）：TrChat 在现代版本用
+    //   player.sendSystemMessage(...) 发玩家聊天（NMSImpl12005 / NMSImpl260100），
+    // 消息因此不是原版玩家聊天包，而是系统消息；而 mineflayer 的 chat 事件
+    // 是**用一条正则去匹配渲染后的字符串**产生的（lib/plugins/chat.js）：
+    //   ^(?:\(.{1,15}\)|\[.{1,15}\]|.){0,5}?(\w+)\s?[>:\-»\])~]+\s(.*)$
+    // 于是格式稍有变化（全角冒号、等级标签、前缀层数过多、名字非 ASCII…）就会
+    // 匹配失败（→ chat 不触发，消息全丢）或匹配到**错误的用户名**（→ 主人判定失败）。
+    //
+    // 策略：先用同一条正则判断""mineflayer 会怎么处理""：
+    //   · 它匹配不上      → 聊天事件不会来，由本补丁解析并直接投递给基座；
+    //   · 它匹配上了但用户名不是在线玩家 → 本补丁解析结果更可信，接管并屏蔽它那次；
+    //   · 它匹配上了且用户名是在线玩家 → 放手让 mineflayer 处理（不重复、不干扰）。
+    var __VANILLA_CHAT_RE = /^(?:\(.{1,15}\)|\[.{1,15}\]|.){0,5}?(\w+)\s?[>:\-»\])~]+\s(.*)$/;
+
+    // 最近一次由""本补丁接管""投递的那行原文，用于屏蔽 mineflayer 紧随其后的 chat 事件
+    var __lastOwnDispatch = { rendered: null, at: 0 };
+
+    function __onlinePlayers() {
+      var out = [];
+      try {
+        var bot = __state.bot;
+        var pl = (bot && bot.players) || {};
+        var me = bot && bot.username;
+        for (var k in pl) {
+          if (!Object.prototype.hasOwnProperty.call(pl, k)) continue;
+          if (!k || k.length < 2) continue;
+          if (me && k.toLowerCase() === String(me).toLowerCase()) continue;
+          out.push(k);
+        }
+      } catch (e) { }
+      return out;
+    }
+
+    function __isOnlinePlayer(name) {
+      if (!name) return false;
+      var ln = String(name).toLowerCase();
+      var list = __onlinePlayers();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].toLowerCase() === ln) return true;
+      }
+      return false;
+    }
+
+    // 从 JSON 组件里找 clickEvent 指向 /tell <名字> 的名字。
+    // TrChat 默认模板里玩家名自带「点击私聊」：suggest: '/tell %player_name% '，
+    // 这是模板本身给出的机器可读信号，不受前缀/颜色/占位符影响。
+    function __nameFromJson(jsonMsg) {
+      try {
+        var raw = null;
+        if (jsonMsg) {
+          if (typeof jsonMsg.json === 'object' && jsonMsg.json) raw = jsonMsg.json;
+          else if (typeof jsonMsg.toJSON === 'function') raw = jsonMsg.toJSON();
+          else if (typeof jsonMsg.toJson === 'function') raw = jsonMsg.toJson();
+        }
+        if (!raw) return null;
+        var found = null;
+        var walk = function (node) {
+          if (!node || found) return;
+          if (Array.isArray(node)) {
+            for (var i = 0; i < node.length; i++) walk(node[i]);
+            return;
+          }
+          if (typeof node !== 'object') return;
+          var ce = node.clickEvent;
+          if (ce && typeof ce === 'object') {
+            var val = String(ce.value || '');
+            var m = val.match(/^\/(?:tell|msg|m|w|whisper)\s+([A-Za-z0-9_]{2,16})\b/);
+            if (m && __isOnlinePlayer(m[1])) { found = m[1]; return; }
+          }
+          if (node.extra) walk(node.extra);
+          if (node.with) walk(node.with);
+          if (node.children) walk(node.children);
+        };
+        walk(raw);
+        return found;
+      } catch (e) { return null; }
+    }
+
+    // 兜底：在渲染后的字符串里找「在线玩家名 + 分隔符 + 正文」。
+    // 长名优先（避免 Cold_ 抢在 Cold_Fan 前面），并要求名字前面不是单词字符
+    // （避免 ""of"" 命中 ""a lot of stuff: ..."" 这类误判）。
+    // 名字后面允许跟一个短标签（等级/称号，如 [Lv.5] / (VIP)），分隔符允许连写（>> / || 等）。
+    function __nameFromPlayers(str) {
+      var s = String(str || '');
+      var names = __onlinePlayers();
+      if (!names.length) return null;
+      names.sort(function (a, b) { return b.length - a.length; });
+      var esc = function (x) { return String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+      var re;
+      try {
+        re = new RegExp(
+          '(^|[^A-Za-z0-9_])(' + names.map(esc).join('|') + ')' +
+          '\\s*(?:\\[[^\\]]{0,20}\\]|\\([^)]{0,20}\\))?' +
+          '\\s*[:：>»›|｜▍▎▏▕│┃]+\\s*([\\s\\S]+)', 'i');
+      } catch (e) { return null; }
+      var m = s.match(re);
+      if (!m) return null;
+      var text = String(m[3]).trim();
+      if (!text) return null;
+      return { speaker: m[2], msg: text };
+    }
+
+    // 综合解析：JSON clickEvent 优先，其次在线玩家名兜底
+    function __parsePublicChat(str, jsonMsg) {
+      var nm = __nameFromJson(jsonMsg);
+      if (nm) {
+        var cut = __sliceAfterName(str, nm);
+        if (cut) return { speaker: nm, msg: cut };
+      }
+      return __nameFromPlayers(str);
+    }
+
+    // 从 ""前缀 + 名字 + 分隔符 + 正文"" 里切出正文。
+    // 只在 JSON 已确认说话人时使用，所以可以宽容：名字之后跳过空白与常见分隔符
+    // （冒号/尖括号/管道/箭头/装饰符），剩下的就是正文——服主改过分隔符也能切。
+    function __sliceAfterName(str, name) {
+      try {
+        var s = String(str || '');
+        var i = s.toLowerCase().indexOf(String(name).toLowerCase());
+        if (i < 0) return null;
+        var rest = s.slice(i + String(name).length);
+        // 名字后允许一个短标签（[Lv.5] / (VIP)），再跳过""分隔符风格""的字符
+        // （冒号/尖括号/管道/方块/短横/等号/间隔点），最多 6 个——避免把正文开头的标点也吃掉
+        var m = rest.match(/^(?:\s*[\[(][^\])]{0,20}[\])])?[\s:：>»›|｜▍▎▏▕│┃\-–—=~·•]{0,6}([\s\S]*)$/);
+        if (!m) return null;
+        var text = String(m[1]).trim();
+        return text || null;
+      } catch (e) { return null; }
+    }
+
+    // ── 关键词连听（Follow-up）──
+    // 触发一次后，同一个人接下来的若干条消息不必再说关键词。
+    // · 只粘最近一次通过触发判定的人；新触发直接截断替换。
+    // · 无关的人说话：既不打断也不扣次数（只有本人消息才扣）。
+    // · 超时可关；开启时""滑动计时""——每收到一条被连听的消息就重新计时。
+    // · 仅关键词类触发模式生效（owner_only 没有关键词概念）。
+    var __followup = null;
+
+    function __followupCfg() {
+      if (String(process.env.CHAT_FOLLOWUP_ENABLED || 'false').toLowerCase() !== 'true') return null;
+      var mode = String(process.env.TRIGGER_MODE || 'hybrid').toLowerCase();
+      if (mode === 'owner_only') return null;
+      var count = parseInt(process.env.CHAT_FOLLOWUP_COUNT || '3', 10);
+      if (!isFinite(count) || count <= 0) return null;
+      var timeoutEnabled = String(process.env.CHAT_FOLLOWUP_TIMEOUT_ENABLED || 'true').toLowerCase() === 'true';
+      var timeoutSec = parseInt(process.env.CHAT_FOLLOWUP_TIMEOUT_SECONDS || '60', 10);
+      if (!isFinite(timeoutSec) || timeoutSec <= 0) timeoutSec = 60;
+      return { count: count, timeoutEnabled: timeoutEnabled, timeoutSec: timeoutSec };
+    }
+
+    function __followupExpired(st, cfg) {
+      if (!st) return true;
+      if (!cfg.timeoutEnabled) return false;
+      return (Date.now() - st.at) > (cfg.timeoutSec * 1000);
+    }
+
+    // 本次被正常触发规则放行 → 开启/刷新连听窗口（截断：直接换成这个人）
+    function __followupOpen(speaker, cfg) {
+      __followup = {
+        name: String(speaker == null ? '' : speaker).trim().toLowerCase(),
+        remaining: cfg.count,
+        at: Date.now()
+      };
+    }
+
+    // 本次未被规则放行 → 看是否处于该玩家的连听窗口内；是则消费一次
+    function __followupConsume(speaker, cfg) {
+      if (!__followup) return false;
+      if (__followupExpired(__followup, cfg)) { __followup = null; return false; }
+      var ln = String(speaker == null ? '' : speaker).trim().toLowerCase();
+      if (__followup.name !== ln) return false;
+      if (__followup.remaining <= 0) { __followup = null; return false; }
+      __followup.remaining -= 1;
+      __followup.at = Date.now();
+      if (__followup.remaining <= 0) __followup = null;
+      return true;
+    }
+
     // 判定消息处置方式：null(无关) / owner / speaker / block
     function __gate(eventName, args) {
       var speaker = null, msg = null;
-      if (eventName === 'chat') { speaker = args[0]; msg = args[1]; }
+      var dispatch = false;
+      if (eventName === 'chat') {
+        // mineflayer 由 messagestr 正则匹配产生 chat；若本补丁已接管同一行，
+        // 这里必须拦下，否则一句话会被处理两遍（且这次的用户名可能是错的）
+        if (__lastOwnDispatch.rendered !== null &&
+            String(args[3]) === __lastOwnDispatch.rendered &&
+            (Date.now() - __lastOwnDispatch.at) < 1500) {
+          return { verdict: 'block', speaker: String(args[0] || '') };
+        }
+        speaker = args[0]; msg = args[1];
+      }
       else if (eventName === 'messagestr') {
-        var w = __parseWhisper(args[0]);
-        if (!w) return null;
-        speaker = w.speaker; msg = w.msg;
+        var raw = String(args[0] == null ? '' : args[0]);
+        var w = __parseWhisper(raw);
+        if (w) { speaker = w.speaker; msg = w.msg; }
+        else {
+          var tellMode = String(process.env.TELL_MODE || 'whisper').toLowerCase();
+          if (tellMode !== 'public') return null;
+          var pos = args[1];
+          if (pos === 'game_info' || pos === 2) return null;   // 动作栏/物品栏提示，不是聊天
+          var vm = raw.match(__VANILLA_CHAT_RE);
+          var parsed = null;
+          if (!vm) {
+            // mineflayer 匹配不上 → chat 事件永远不会来，必须自己投递
+            parsed = __parsePublicChat(raw, args[2]);
+          } else if (!__isOnlinePlayer(vm[1])) {
+            // mineflayer 匹配上了但把非玩家（如世界名）当成了说话人 → 用更可信的结果接管
+            var better = __parsePublicChat(raw, args[2]);
+            if (better && __isOnlinePlayer(better.speaker)) parsed = better;
+          }
+          if (!parsed) return null;
+          speaker = parsed.speaker; msg = parsed.msg;
+          dispatch = true;
+          __lastOwnDispatch.rendered = raw;
+          __lastOwnDispatch.at = Date.now();
+          if (String(process.env.DEBUG_MODE || '').toLowerCase() === 'true') {
+            console.log('[Bakabot] 公屏兼容解析: ' + speaker + ' -> ' + msg);
+          }
+        }
       } else return null;
       if (!speaker) return null;
       var c = __cfg();
@@ -850,9 +1065,17 @@ module.exports = StrictAutoTeleportLogin;
       var allow = c.mode === 'owner_only' ? owner
                 : c.mode === 'keyword_only' ? trig
                 : (owner || trig);
+      // 关键词连听：正常触发 → 刷新窗口；否则看是否在窗口内
+      var fuCfg = null;
+      try { fuCfg = __followupCfg(); } catch (e) { fuCfg = null; }
+      if (allow) {
+        if (fuCfg) { try { __followupOpen(speaker, fuCfg); } catch (e) { } }
+      } else if (fuCfg) {
+        try { if (__followupConsume(speaker, fuCfg)) allow = true; } catch (e) { }
+      }
       if (!allow) return { verdict: 'block', speaker: speaker };
       __state.speaker = speaker;
-      return { verdict: owner ? 'owner' : 'speaker', speaker: speaker };
+      return { verdict: owner ? 'owner' : 'speaker', speaker: speaker, dispatch: dispatch, msg: msg };
     }
 
     // LLM 上下文修正：让指令中的“我/主人”指向当前说话人。
@@ -914,6 +1137,13 @@ module.exports = StrictAutoTeleportLogin;
             // 这样回复、指令、LLM 上下文都精确指向正在说话的这位（多主人可互相区分）
             process.env.MC_OWNER_NAME = r.speaker;
             console.log('[Bakabot] 当前服务对象切换为: ' + r.speaker);
+            // 由 messagestr 兜底解析出来的公屏消息：mineflayer 不会自己 emit chat，
+            // 必须在这里直接投递给基座；仍继续向下传，保证其它 messagestr 监听器
+            // （TPA 接受、死亡回传、自动登录等）照常工作——基座自己的公屏分支
+            // 在 public 模式下会提前 return，因此不会重复处理。
+            if (r.dispatch && typeof handleMessage === 'function') {
+              try { handleMessage(r.speaker, r.msg); } catch (e) {}
+            }
             return __origEmit.apply(__bot, [eventName].concat(args));
           };
         } catch(e) {}
