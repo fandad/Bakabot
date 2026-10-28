@@ -23,6 +23,12 @@ public class AppSettings
     // --- ViaProxy 协议代理设置（用于原生支持 26.x 等新年份命名版本）---
     /// <summary>是否启用 ViaProxy 协议代理功能</summary>
     public bool EnableViaProxy { get; set; } = true;
+
+    /// <summary>
+    /// NapCat 看门狗：NapCat 意外退出后自动重启（默认关闭）。
+    /// 只在"用户期望运行、非手动停止、非登录失效"时生效，退避 1/3/5/10/30 秒，最多 5 次/10 分钟。
+    /// </summary>
+    public bool QQWatchdogEnabled { get; set; } = false;
     /// <summary>自定义 java.exe 路径（留空则自动检测）</summary>
     public string JavaPath { get; set; } = string.Empty;
 

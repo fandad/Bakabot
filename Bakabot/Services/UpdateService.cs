@@ -24,7 +24,7 @@ namespace Bakabot.Services;
 public class UpdateService
 {
     /// <summary>当前版本号（发版时同步更新此处，与 Bakabot.csproj 的 &lt;Version&gt; 保持一致）</summary>
-    private readonly string _currentVersion = "2.9.0";
+    private readonly string _currentVersion = "2.9.1";
 
     /// <summary>本仓库的 Releases API（GitHub 会重定向/直接返回最新正式版，不含 draft 与 prerelease）</summary>
     private const string LatestReleaseApi = "https://api.github.com/repos/fandad/Bakabot/releases/latest";

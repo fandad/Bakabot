@@ -265,6 +265,7 @@ public class ViaProxyService : IDisposable
 
         process.Exited += (_, _) =>
         {
+            try { UnrecordPid(process.Id); } catch { }
             _running.Remove(instanceName);
             readyTcs.TrySetResult(false);
         };
@@ -272,6 +273,14 @@ public class ViaProxyService : IDisposable
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+
+        // 绑到 Job Object：启动器一旦消失（含崩溃/强关），内核会连带结束这个 java，
+        // 避免它变成占用 ViaProxy.jar 的孤儿。
+        JobObjectHelper.TryAssign(process);
+
+        // 记下 PID：万一 Job Object 不可用（极少数环境）导致变成孤儿，
+        // 下次启动器启动时可以据此精确清扫（不按进程名，守规则 1）
+        try { RecordPid(process.Id); } catch { }
 
         _running[instanceName] = (process, localPort);
 
@@ -295,6 +304,7 @@ public class ViaProxyService : IDisposable
 
         if (process.HasExited)
         {
+            try { UnrecordPid(process.Id); } catch { }
             _running.Remove(instanceName);
             throw new Exception(
                 $"ViaProxy 启动失败（退出码: {process.ExitCode}）。\n" +
@@ -322,6 +332,7 @@ public class ViaProxyService : IDisposable
         catch { /* 忽略清理时的错误 */ }
         finally
         {
+            try { UnrecordPid(entry.Process.Id); } catch { }
             entry.Process.Dispose();
             _running.Remove(instanceName);
         }
@@ -330,6 +341,123 @@ public class ViaProxyService : IDisposable
     /// <summary>指定实例的代理是否仍在运行</summary>
     public bool IsProxyRunning(string instanceName)
         => _running.TryGetValue(instanceName, out var e) && !e.Process.HasExited;
+
+    /// <summary>当前有多少个实例的代理在跑</summary>
+    public int RunningCount => _running.Count;
+
+    /// <summary>
+    /// 停止所有实例的代理进程。用于"设置里把协议代理开关关掉"时立即生效
+    /// （Job Object 只在启动器退出时生效，关选项必须显式停）。
+    /// </summary>
+    public async Task StopAllAsync()
+    {
+        List<string> names;
+        lock (_running)
+        {
+            names = _running.Keys.ToList();
+        }
+        foreach (var name in names)
+        {
+            try { await StopProxyAsync(name); } catch { /* 忽略单个失败 */ }
+        }
+    }
+
+    /// <summary>
+    /// 清扫历史遗留的 ViaProxy 孤儿进程（启动时调用）。
+    ///
+    /// 识别方式：**我们自己记录的 PID 文件**（每次启动代理后写入、停止后移除）。
+    /// 不用进程名（规则 1：用户的 Minecraft 也是 java.exe），也不用命令行/WMI
+    ///（ViaProxy 自己的参数里就有 --minecraft-account-index，用 "minecraft" 排除会误伤，
+    ///  而 System.Management 项目里没有引用，离线加包有风险）。
+    ///
+    /// 启动器刚启动时，pid 文件里记录的进程必然来自"上一次启动器运行"——
+    /// 那个启动器已经不在了，所以这些代理就是孤儿，可以安全结束。
+    /// </summary>
+    /// <returns>被结束的进程数</returns>
+    public static int SweepOrphanProxies()
+    {
+        var killed = 0;
+        try
+        {
+            var pids = ReadPidFile();
+            foreach (var pid in pids)
+            {
+                try
+                {
+                    using var proc = Process.GetProcessById(pid);
+                    if (proc.HasExited) continue;
+                    // 二次确认是 java，避免 PID 复用误杀
+                    if (!string.Equals(proc.ProcessName, "java", StringComparison.OrdinalIgnoreCase)) continue;
+                    proc.Kill(entireProcessTree: true);
+                    try { proc.WaitForExit(3000); } catch { }
+                    killed++;
+                }
+                catch { /* 进程不存在或无权限：忽略 */ }
+            }
+            WritePidFile(Array.Empty<int>());
+        }
+        catch { /* 清扫失败不影响启动 */ }
+
+        // 无论是否清扫到，都尝试把"上次更新因占用而落成的新版本文件"提升为正式 jar
+        TryPromoteVersionedJar();
+        return killed;
+    }
+
+    private static string PidFilePath => Path.Combine(PathHelper.ViaProxyDir, "viaproxy.pids.json");
+
+    private static List<int> ReadPidFile()
+    {
+        try
+        {
+            var path = PidFilePath;
+            if (!File.Exists(path)) return new List<int>();
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<List<int>>(json) ?? new List<int>();
+        }
+        catch { return new List<int>(); }
+    }
+
+    private static void WritePidFile(IEnumerable<int> pids)
+    {
+        try
+        {
+            Directory.CreateDirectory(PathHelper.ViaProxyDir);
+            File.WriteAllText(PidFilePath, JsonSerializer.Serialize(pids.Distinct().ToList()));
+        }
+        catch { }
+    }
+
+    private static void RecordPid(int pid)
+    {
+        try
+        {
+            var list = ReadPidFile();
+            if (!list.Contains(pid)) list.Add(pid);
+            WritePidFile(list);
+        }
+        catch { }
+    }
+
+    private static void UnrecordPid(int pid)
+    {
+        try
+        {
+            var list = ReadPidFile();
+            list.RemoveAll(x => x == pid);
+            WritePidFile(list);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 把更新时落下的 ViaProxy-*.jar 提升为正式 ViaProxy.jar。
+    /// 用于上次更新时旧 jar 被占用、只能另存为新文件名的情况。
+    /// </summary>
+    public static bool TryPromoteVersionedJar()
+        => ViaProxyJarInstaller.PromoteVersioned(PathHelper.ViaProxyDir, PathHelper.ViaProxyJarPath) != null;
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void UnusedPlaceholder() { }
 
     // ─── 内部辅助方法 ───
 

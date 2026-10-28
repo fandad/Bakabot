@@ -61,6 +61,10 @@ public partial class QQViewModel : ObservableObject
     [ObservableProperty]
     private bool _isNapCatRunning;
 
+    /// <summary>NapCat 看门狗开关（意外退出后自动重启，默认关）</summary>
+    [ObservableProperty]
+    private bool _qqWatchdogEnabled;
+
     [ObservableProperty]
     private bool _isNapCatAvailable;
 
@@ -97,6 +101,7 @@ public partial class QQViewModel : ObservableObject
         _qqGroupIds = settings.QQGroupIds ?? string.Empty;
         _qqTriggerKeywords = settings.QQTriggerKeywords ?? string.Empty;
         _qqSuppressNonAI = settings.QQSuppressNonAI;
+        _qqWatchdogEnabled = settings.QQWatchdogEnabled;
 
         _instanceManager.Instances.CollectionChanged += (_, _) => RefreshInstanceOptions();
         _qqService.WhitelistChanged += (_, _) => RebuildRows();
@@ -106,6 +111,11 @@ public partial class QQViewModel : ObservableObject
         RefreshInstanceOptions();
         RebuildRows();
         RefreshStatus();
+    }
+
+    partial void OnQqWatchdogEnabledChanged(bool value)
+    {
+        _settingsService.UpdateSettings(s => s.QQWatchdogEnabled = value);
     }
 
     partial void OnQqEnabledChanged(bool value)

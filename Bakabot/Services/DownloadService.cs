@@ -53,8 +53,16 @@ public class DownloadService
     public bool IsViaProxyDownloaded() => File.Exists(PathHelper.ViaProxyJarPath);
 
     /// <summary>
-    /// 下载最新版 ViaProxy JAR（始终重新下载，不会因为旧文件已存在就跳过；
-    /// 覆盖前先删除旧文件，避免残留旧版本）。
+    /// 下载最新版 ViaProxy JAR。
+    ///
+    /// 2026-10-28 改：原实现"先删旧 jar 再下载"，只要旧 jar 被任何进程占用（典型是
+    /// 上一次启动器留下的孤儿 java）就必抛 IOException，表现为"任何情况下都提示被占用、
+    /// 关实例关启动器都没用"。现在改为：
+    ///   ① 先下载到 ViaProxy.jar.new（完全不碰正式 jar，下载失败也不破坏现有安装）；
+    ///   ② 尝试替换；若被占用，**结束我们记录过的代理进程**（pid 文件）后重试一次；
+    ///   ③ 仍被占用（例如是用户自己手动起的代理）→ 落成版本化文件名
+    ///      ViaProxy-&lt;时间戳&gt;.jar，并明确提示"下次启动启动器时会自动替换"。
+    ///      下次启动时 SweepOrphanProxies() 会把它提升为正式 jar。
     /// </summary>
     public async Task DownloadViaProxyAsync(
         IProgress<(long downloaded, long total)>? progress = null,
@@ -62,22 +70,52 @@ public class DownloadService
     {
         Directory.CreateDirectory(PathHelper.ViaProxyDir);
 
-        // 覆盖已有 JAR：先删掉旧的，确保拿到的确实是新版本而不是被跳过
-        if (File.Exists(PathHelper.ViaProxyJarPath))
-        {
-            try { File.Delete(PathHelper.ViaProxyJarPath); }
-            catch (IOException)
-            {
-                throw new InvalidOperationException(
-                    "无法覆盖已有的 ViaProxy.jar（文件正被占用）。\n" +
-                    "请先在设置里停止正在使用 ViaProxy 的实例，或关闭启动器后重试。");
-            }
-        }
+        var target = PathHelper.ViaProxyJarPath;
+        var temp = target + ".new";
 
         var officialUrl = await ResolveViaProxyDownloadUrlAsync(ct);
-        await DownloadWithFallbackAsync(ToGhMirror(officialUrl), officialUrl,
-            PathHelper.ViaProxyJarPath, progress, ct);
+        try
+        {
+            await DownloadWithFallbackAsync(ToGhMirror(officialUrl), officialUrl, temp, progress, ct);
+        }
+        catch
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            throw;
+        }
+
+        // ① 直接替换
+        if (TryReplace(temp, target)) return;
+
+        // ② 被占用：结束我们记录过的代理进程后重试一次
+        int killed = 0;
+        try { killed = ViaProxyService.SweepOrphanProxies(); } catch { }
+        if (TryReplace(temp, target)) return;
+
+        // ③ 仍然占用 → 落成版本化文件，等下次启动自动提升
+        string versioned;
+        try
+        {
+            versioned = ViaProxyJarInstaller.SaveAsVersioned(temp, PathHelper.ViaProxyDir);
+        }
+        catch (Exception ex)
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            throw new InvalidOperationException(
+                "新版本下载成功但无法保存：" + ex.Message, ex);
+        }
+
+        throw new InvalidOperationException(
+            "新版本已下载，但旧的 ViaProxy.jar 正被其它进程占用，无法立即替换。\n" +
+            (killed > 0 ? $"（已尝试结束 {killed} 个残留代理进程，仍被占用）\n" : "") +
+            "新文件已保存为：\n  " + versioned + "\n" +
+            "→ 重启启动器即可自动替换为正式版本；\n" +
+            "→ 或手动结束占用该 jar 的 java 进程后，在设置里再点一次「更新到最新版」。");
     }
+
+    /// <summary>把临时文件替换为正式 jar（策略见 ViaProxyJarInstaller）</summary>
+    private static bool TryReplace(string temp, string target)
+        => ViaProxyJarInstaller.TryReplace(temp, target);
 
     /// <summary>本地已安装的 ViaProxy 版本号（无 JAR 或读取失败返回 null）</summary>
     public string? GetInstalledViaProxyVersion() => TryGetInstalledViaProxyVersion();

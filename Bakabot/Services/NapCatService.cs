@@ -27,6 +27,12 @@ public class NapCatService : IDisposable
     private const string WebUiToken = "bakabot";
 
     private readonly SettingsService _settingsService;
+
+    // 看门狗与"用户是否主动停止"状态（2026-10-28 新增）
+    private volatile bool _userStopped;
+    private volatile bool _loginInvalidSignal;
+    private int _restartCount;
+    private DateTime _restartWindowStart = DateTime.MinValue;
     private readonly QQService _qqService;
 
     private readonly object _sync = new();
@@ -96,8 +102,139 @@ public class NapCatService : IDisposable
     /// 启动 NapCat：先写好反向 WS 配置，再起 WS 服务端，最后拉起进程。
     /// 重复调用时直接复用已有进程。
     /// </summary>
+    // ─── 落盘日志（2026-10-28 新增）────────────────────────────────────────
+    // 背景：NapCat 自身 fileLog=false（不写文件），而启动器调用 StartAsync() 时
+    // 没有传 logAction —— 于是 NapCat 的 stdout/stderr 和**退出码全部被丢弃**，
+    // "用久了突然退掉"这类问题事后完全无法归因。
+    // 现在无论调用方是否传 logAction，都统一写到 logs/napcat.log（5MB × 3 轮转）。
+    private static readonly object _fileLogLock = new();
+    private static string LogDir => Path.Combine(PathHelper.RootDir, "logs");
+    private static string NapCatLogPath => Path.Combine(LogDir, "napcat.log");
+
+    private static void FileLog(string line)
+    {
+        try
+        {
+            lock (_fileLogLock)
+            {
+                Directory.CreateDirectory(LogDir);
+                var path = NapCatLogPath;
+                if (File.Exists(path) && new FileInfo(path).Length > 5 * 1024 * 1024)
+                {
+                    var b1 = Path.Combine(LogDir, "napcat.1.log");
+                    var b2 = Path.Combine(LogDir, "napcat.2.log");
+                    var b3 = Path.Combine(LogDir, "napcat.3.log");
+                    try { if (File.Exists(b3)) File.Delete(b3); } catch { }
+                    try { if (File.Exists(b2)) File.Move(b2, b3); } catch { }
+                    try { if (File.Exists(b1)) File.Move(b1, b2); } catch { }
+                    try { File.Move(path, b1); } catch { }
+                }
+                File.AppendAllText(path, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {line}\n", Encoding.UTF8);
+            }
+        }
+        catch { /* 日志失败绝不影响主流程 */ }
+    }
+
+    /// <summary>记录当前 QQ 主进程的 PID/启动时间，用于判断"NapCat 退出是否伴随 QQ 重启"</summary>
+    private static (int Pid, DateTime? Start) SnapshotQq()
+    {
+        try
+        {
+            Process? best = null;
+            foreach (var p in Process.GetProcessesByName("QQ"))
+            {
+                try
+                {
+                    if (best == null || p.StartTime < best.StartTime) best = p;
+                }
+                catch { if (best == null) best = p; }
+            }
+            if (best == null) return (0, null);
+            DateTime? st = null;
+            try { st = best.StartTime; } catch { }
+            return (best.Id, st);
+        }
+        catch { return (0, null); }
+    }
+
+    /// <summary>
+    /// 判断是否为"例行消息流量"（收/发群聊私聊）。这类日志量极大（实测 20 秒 35KB），
+    /// 落盘会把 5MB 轮转很快写满，掩盖真正有用的告警，因此不写入文件（仍转发给 logAction）。
+    /// </summary>
+    private static bool IsRoutineTraffic(string? line)
+    {
+        if (string.IsNullOrEmpty(line)) return false;
+        return line.Contains("接收 <-", StringComparison.Ordinal)
+            || line.Contains("发送 ->", StringComparison.Ordinal);
+    }
+
+    /// <summary>判断一行输出是否代表"登录失效/被踢下线"这类重启也没用的信号</summary>
+    private static bool LooksLikeLoginFailure(string? line)
+    {
+        if (string.IsNullOrEmpty(line)) return false;
+        foreach (var k in new[] { "登录失效", "被踢", "下线", "重新登录", "扫码登录", "账号异常", "登录失败" })
+        {
+            if (line.Contains(k, StringComparison.Ordinal)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 看门狗（默认关闭，需在 QQ 页手动开启）。
+    /// 只在"用户期望它运行、且不是用户点停止、且不是登录失效"时自动重启；
+    /// 退避 1/3/5/10/30 秒，最多 5 次 / 10 分钟，超限则停手并提示看日志。
+    /// </summary>
+    private void MaybeScheduleWatchdogRestart(int exitCode, bool qqGone, Action<string>? logAction)
+    {
+        if (_userStopped) { FileLog("看门狗：用户手动停止，不重启"); return; }
+        if (!_settingsService.Settings.QQWatchdogEnabled) return;   // 默认关
+        if (_loginInvalidSignal)
+        {
+            FileLog("看门狗：检测到登录失效类信号，不自动重启（重启无效，请重新登录）");
+            UpdateState(false, "NapCat 已退出（登录失效，已停止自动重启，请重新登录）");
+            return;
+        }
+
+        var now = DateTime.Now;
+        if (_restartWindowStart == DateTime.MinValue || (now - _restartWindowStart).TotalMinutes >= 10)
+        {
+            _restartWindowStart = now;
+            _restartCount = 0;
+        }
+        if (_restartCount >= 5)
+        {
+            FileLog("看门狗：10 分钟内已重启 5 次，停止自动重启");
+            UpdateState(false, "NapCat 反复退出，已停止自动重启，请查看 logs/napcat.log");
+            return;
+        }
+
+        _restartCount++;
+        var delays = new[] { 1, 3, 5, 10, 30 };
+        var delay = delays[Math.Min(_restartCount - 1, delays.Length - 1)];
+        FileLog($"看门狗：{delay} 秒后第 {_restartCount} 次自动重启" + (qqGone ? "（独立 QQ 进程已退出）" : ""));
+        UpdateState(false, $"NapCat 意外退出，{delay} 秒后自动重启（第 {_restartCount} 次）");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delay));
+                if (_userStopped) return;
+                await StartAsync(logAction);
+                FileLog("看门狗：自动重启完成");
+            }
+            catch (Exception ex)
+            {
+                FileLog("看门狗：自动重启失败 " + ex.Message);
+                UpdateState(false, "NapCat 自动重启失败：" + ex.Message);
+            }
+        });
+    }
+
     public async Task StartAsync(Action<string>? logAction = null)
     {
+        _userStopped = false;          // 进入"用户期望运行"状态
+        _loginInvalidSignal = false;
         if (IsRunning)
         {
             UpdateState(running: true, "NapCat 已在运行");
@@ -167,9 +304,12 @@ public class NapCatService : IDisposable
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         var readyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        (int Pid, DateTime? Start) qqBefore = default;   // Exited 回调要用，必须提前声明
         process.OutputDataReceived += (_, e) =>
         {
             if (e.Data == null) return;
+            if (!IsRoutineTraffic(e.Data)) FileLog("[out] " + e.Data);
+            if (LooksLikeLoginFailure(e.Data)) _loginInvalidSignal = true;
             logAction?.Invoke($"[NapCat] {e.Data}");
             TryParseWebUiUrl(e.Data);
             TryParseLoginHint(e.Data);
@@ -181,6 +321,8 @@ public class NapCatService : IDisposable
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data == null) return;
+            FileLog("[err] " + e.Data);
+            if (LooksLikeLoginFailure(e.Data)) _loginInvalidSignal = true;
             logAction?.Invoke($"[NapCat] {e.Data}");
             TryParseWebUiUrl(e.Data);
             TryParseLoginHint(e.Data);
@@ -193,11 +335,43 @@ public class NapCatService : IDisposable
                 _process = null;
             }
             readyTcs.TrySetResult(false);
-            UpdateState(running: false, "NapCat 已退出");
-            logAction?.Invoke($"[NapCat] 进程退出（码 {process.ExitCode}）");
+
+            // ── 退出归因：退出码 + 距今多久 + QQ 是否重启过 ──
+            int exitCode = -1;
+            try { exitCode = process.ExitCode; } catch { }
+            var qqAfter = SnapshotQq();
+            string qqReason;
+            if (qqBefore.Pid == 0 && qqAfter.Pid == 0)
+            {
+                // NapCat.Shell 是**内嵌托管 QQNT**，本来就不会有独立的 QQ.exe 进程，
+                // 所以"没有 QQ 进程"不能推断成"QQ 崩了/没运行"（2026-10-28 实测踩到）。
+                qqReason = "无独立 QQ 进程（NapCat 内嵌托管 QQNT，属正常；此路径下无法用 QQ 进程判断是否热更新）";
+            }
+            else if (qqAfter.Pid == 0)
+                qqReason = $"QQ 已退出（启动前 pid {qqBefore.Pid}）";
+            else if (qqBefore.Pid != 0 && (qqAfter.Pid != qqBefore.Pid || qqAfter.Start != qqBefore.Start))
+                qqReason = $"QQ 已重启（pid {qqBefore.Pid}→{qqAfter.Pid}），很可能是 QQ 热更新/重启导致 NapCat 随之退出";
+            else qqReason = $"QQ 仍在运行（pid {qqAfter.Pid}），说明是 NapCat 自身退出";
+
+            var reason = $"进程退出（码 {exitCode}）；{qqReason}";
+            FileLog("退出: " + reason);
+            logAction?.Invoke($"[NapCat] {reason}");
+
+            var st = $"NapCat 已退出：{reason}";
+            UpdateState(running: false, st);
+
+            // ── 看门狗（默认关闭）：仅"用户期望运行 + 非用户手动停止 + 非登录失效"时重启 ──
+            // 只有"确实存在独立 QQ 进程、且现在没了"才算 QQ 退出；
+            // NapCat.Shell 内嵌托管 QQNT 时 qqPid 一直是 0，不能据此判断
+            var qqReallyGone = qqBefore.Pid != 0 && qqAfter.Pid == 0;
+            try { MaybeScheduleWatchdogRestart(exitCode, qqReallyGone, logAction); } catch { }
         };
 
+        qqBefore = SnapshotQq();
         process.Start();
+        // 绑 Job Object：启动器崩溃/被强关时，NapCat 也不会残留
+        JobObjectHelper.TryAssign(process);
+        FileLog($"启动 NapCat: pid={process.Id} QQ pid={qqBefore.Pid} QQ 启动于 {qqBefore.Start?.ToString("yyyy-MM-dd HH:mm:ss") ?? "?"}");
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -227,6 +401,7 @@ public class NapCatService : IDisposable
     /// <summary>停止 NapCat 进程并关闭反向 WS 服务端</summary>
     public async Task StopAsync()
     {
+        _userStopped = true;           // 用户主动停止 → 看门狗不得重启
         Process? process;
         lock (_sync)
         {
@@ -370,6 +545,20 @@ public class NapCatService : IDisposable
             lock (_sync)
                 _clients.Remove(client);
             client.Dispose();
+
+            // WS 断开时也更新状态：此前只有"连上"时更新，断线后界面仍显示"已连接"，
+            // 会让人误以为一切正常（2026-10-28 用户反馈"浏览器显示失效"时的困惑点）。
+            try
+            {
+                bool anyLeft;
+                lock (_sync) anyLeft = _clients.Count > 0;
+                if (!anyLeft && IsRunning)
+                {
+                    FileLog("WS 连接已断开（无剩余客户端）");
+                    UpdateState(IsRunning, "NapCat 进程在跑，但与启动器的 WS 连接已断开（会自动重连）");
+                }
+            }
+            catch { }
         }
     }
 

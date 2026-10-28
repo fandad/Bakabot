@@ -99,7 +99,7 @@ public class LocalApiService : IDisposable
                 await WriteJsonAsync(ctx, 200, new
                 {
                     name = "Bakabot MCP Local API",
-                    version = "2.9.0",
+                    version = "2.9.1",
                     enabled = true,
                 });
                 return;

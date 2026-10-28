@@ -23,6 +23,20 @@ public partial class App : Application
 
         PathHelper.EnsureDirectories();
 
+        // 把子进程（java / node / napcat）绑到"随本进程关闭而结束"的 Job Object 上。
+        // 即使启动器被强关或崩溃，也不会留下占用 ViaProxy.jar 的孤儿进程
+        //（2026-10-28 实测：孤儿 java 会让"更新到最新版"永远报文件被占用）。
+        // 失败时静默降级，仍由 OnExit 的显式清理兜底。
+        JobObjectHelper.EnsureInitialized();
+
+        // 清扫历史遗留的 ViaProxy 孤儿：只按「精确 jar 完整路径 + -jar」匹配，
+        // 绝不用进程名、也绝不用 "minecraft" 这类宽泛关键字
+        //（踩过：ViaProxy 自己的参数里就有 --minecraft-account-index，会被误伤）。
+        if (!isMcpStdio)
+        {
+            try { ViaProxyService.SweepOrphanProxies(); } catch { /* 清扫失败不影响启动 */ }
+        }
+
         var serviceCollection = new ServiceCollection();
         ConfigureServices(serviceCollection);
         Services = serviceCollection.BuildServiceProvider();

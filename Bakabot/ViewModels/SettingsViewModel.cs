@@ -156,7 +156,7 @@ public partial class SettingsViewModel : ObservableObject
     private string _mcpIpWhitelist = string.Empty;
 
     // ─── 关于 ───
-    public string AppVersion => "2.9.0";
+    public string AppVersion => "2.9.1";
     public string DotNetVersion => System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
     public string AppDataPath => PathHelper.RootDir;
 
@@ -450,6 +450,26 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnEnableViaProxyChanged(bool value)
     {
         _settingsService.UpdateSettings(s => s.EnableViaProxy = value);
+
+        // 关掉协议代理 → 立即结束所有正在运行的代理进程。
+        // Job Object 只在启动器退出时生效，所以"关选项"这一条必须显式处理，
+        // 否则 java 会一直拿着 ViaProxy.jar（之后更新就会报"文件被占用"）。
+        if (!value && _viaProxyService.RunningCount > 0)
+        {
+            var n = _viaProxyService.RunningCount;
+            var answer = MessageBox.Show(
+                $"当前有 {n} 个实例的协议代理正在运行。\n" +
+                "关闭该功能会立即结束这些代理，正在运行的实例会掉线。\n\n确定关闭吗？",
+                "关闭协议代理", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                // 用户取消 → 把开关拨回去
+                EnableViaProxy = true;
+                return;
+            }
+            _ = _viaProxyService.StopAllAsync();
+            ViaProxyStatusText = "已关闭协议代理，正在运行的代理已结束";
+        }
     }
 
     partial void OnMcpEnabledChanged(bool value)

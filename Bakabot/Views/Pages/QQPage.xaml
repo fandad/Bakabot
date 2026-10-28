@@ -156,6 +156,16 @@
                                     Height="4"
                                     Margin="0,8,0,0"
                                     Visibility="Collapsed" />
+
+                                <!-- NapCat 看门狗：意外退出后自动重启（默认关闭） -->
+                                <DockPanel Margin="0,10,0,0" ToolTipService.ToolTip="打开后：NapCat 意外退出会自动重启（退避 1/3/5/10/30 秒，最多 5 次/10 分钟）；检测到登录失效则不会自动重启。每次退出原因都会写入 logs
+apcat.log。">
+                                    <ui:ToggleSwitch DockPanel.Dock="Right" IsChecked="{Binding QqWatchdogEnabled}" VerticalAlignment="Center" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="意外退出自动重启（看门狗）" FontSize="12" FontWeight="Medium" />
+                                        <TextBlock Text="默认关闭；开启后仅在非登录失效时自动重启" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </DockPanel>
                             </StackPanel>
 
                             <StackPanel
