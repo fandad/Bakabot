@@ -339,6 +339,7 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchOwnerKeywordMode(content);   // 第 4 种触发模式（主人+关键词）
         content = PatchMsgTellMode(content);
         content = PatchQQBridgeV2(content);
+        content = PatchForbidMiningGuard(content);
         content = PatchTpSplitMount(content);
         content = PatchQuickCommands(content);
         content = PatchStartupGreeting(content);
@@ -369,6 +370,30 @@ module.exports = StrictAutoTeleportLogin;
 
         // 容器取物读取健壮性（等待 + 重试，避免误判容器为空）
         PatchTakeItems(srcDir);
+
+        // FollowPlayer 一次性模式（「走到我面前」到位即停，不再变成持续跟随）
+        PatchFollowOnce(srcDir);
+
+        // 附魔书匹配归一（中文/罗马数字等级 + NBT 命名空间 id）
+        PatchTradeEnchantMatch(srcDir);
+
+        // 窄道自愈（一格宽通道卡拐角：卡住时先切保守走法重试一次）
+        PatchPathfinderTightMode(srcDir);
+
+        // 跟随时的窄道自愈（FollowPlayer 卡在拐角没有任何检测）
+        PatchFollowTightMode(srcDir);
+
+        // 交易结束汇总"这些村民卖哪些附魔书"（一条消息，不刷屏）
+        PatchTradeBookReport(srcDir);
+
+        // 交易成交校验（买错书/索引错位时立刻停下并播报）
+        PatchTradeBuyVerify(srcDir);
+
+        // 裸 pathfinder.goto 的卡住自愈（交易走近 / 走到玩家 都会卡窄道）
+        PatchGotoTightRetry(srcDir);
+
+        // 附魔书 components 支持（26.x 物品数据不在 nbt 里）+ 跳过村民的游戏内诊断
+        PatchTradeEnchantComponents(srcDir);
 
         // 任务连贯性诊断（CraftItem / DropItemAction 关键节点打印真实背包）
         PatchTaskContinuityDiag(srcDir);
@@ -415,6 +440,7 @@ module.exports = StrictAutoTeleportLogin;
         content = PatchOwnerKeywordMode(content);   // 第 4 种触发模式（主人+关键词）
         content = PatchMsgTellMode(content);
         content = PatchQQBridgeV2(content);
+        content = PatchForbidMiningGuard(content);
         content = PatchTpSplitMount(content);
         content = PatchQuickCommands(content);
         content = PatchStartupGreeting(content);
@@ -434,6 +460,30 @@ module.exports = StrictAutoTeleportLogin;
 
         // 容器取物补丁同步刷新（幂等：先剥离本补丁各处注入，再无条件重新注入）
         PatchTakeItems(srcDir);
+
+        // FollowPlayer 一次性模式同步刷新（幂等）
+        PatchFollowOnce(srcDir);
+
+        // 附魔书匹配归一（中文/罗马数字等级 + NBT 命名空间 id）
+        PatchTradeEnchantMatch(srcDir);
+
+        // 窄道自愈（一格宽通道卡拐角：卡住时先切保守走法重试一次）
+        PatchPathfinderTightMode(srcDir);
+
+        // 跟随时的窄道自愈（FollowPlayer 卡在拐角没有任何检测）
+        PatchFollowTightMode(srcDir);
+
+        // 交易结束汇总"这些村民卖哪些附魔书"（一条消息，不刷屏）
+        PatchTradeBookReport(srcDir);
+
+        // 交易成交校验（买错书/索引错位时立刻停下并播报）
+        PatchTradeBuyVerify(srcDir);
+
+        // 裸 pathfinder.goto 的卡住自愈（交易走近 / 走到玩家 都会卡窄道）
+        PatchGotoTightRetry(srcDir);
+
+        // 附魔书 components 支持（26.x 物品数据不在 nbt 里）+ 跳过村民的游戏内诊断
+        PatchTradeEnchantComponents(srcDir);
 
         // 任务连贯性诊断同步刷新（幂等：先还原上游原样，再重新注入）
         PatchTaskContinuityDiag(srcDir);
@@ -1753,6 +1803,722 @@ module.exports = StrictAutoTeleportLogin;
     /// 幂等：注入前先把上一轮的调用形式还原成上游原样，再无条件重新注入；
     /// 已还原/已注入两种形态各匹配其一，天然跳过。
     /// </summary>
+    /// <summary>
+    /// 基础包原有的那行日志只给出「N 条交易 / 匹配 M 条」，分不清三种根因：
+    ///   ① N=0 —— 交易窗口没解析出来（ViaProxy/ViaVersion 转换服常见）；
+    ///   ② N>0、M=0 —— 物品匹配失败（模型传错 item_name / 附魔书 components）；
+    ///   ③ 压根没找到村民（entityType 判定问题）。
+    /// 因此这里补两行日志：找到的村民清单（找不到时打印半径内实体类型）、
+    /// 以及每位村民前 8 条交易的产物名。定位完把本方法与两处调用一起删掉即可。
+    /// 每行都带 __bakabot_trade_diag__ 标记，剥离时按行 RemoveAll，天然幂等。
+    /// </summary>
+    private static void PatchTradeVillagerDiag(string srcDir)
+    {
+        var file = Path.Combine(srcDir, "actions", "trade", "TradeVillager.js");
+        if (!File.Exists(file)) return;
+
+        const string mark = "__bakabot_trade_diag__";
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        // ① 找到的村民清单（找不到时列出半径内实体类型，用于判断 entityType 是否被转换服改掉）
+        var triedIdx = lines.FindIndex(l => l.Contains("const tried = new Set();"));
+        if (triedIdx >= 0)
+        {
+            var ind = new string(' ', lines[triedIdx].Length - lines[triedIdx].TrimStart().Length);
+            lines.Insert(triedIdx, ind + @"try { var __btdV = villagers.map(function (v) { return v.id + '@' + v.dist.toFixed(1); }).join(', '); if (!villagers.length) { var __btdT = {}; for (var __btdK in this.bot.entities) { var __btdE = this.bot.entities[__btdK]; if (!__btdE || !__btdE.position || __btdE === this.bot.entity) continue; var __btdD = this.bot.entity.position.distanceTo(__btdE.position); if (__btdD <= this.radius) { var __btdN = (__btdE.name || __btdE.type || '?') + '#' + __btdE.id; __btdT[__btdN] = (__btdT[__btdN] || 0) + 1; } } __btdV = '半径内实体: ' + JSON.stringify(__btdT); } console.log('[TradeVillagerDiag] 村民数=' + villagers.length + ' 明细: ' + __btdV); } catch (e) { console.log('[TradeVillagerDiag] 列举失败: ' + (e && e.message)); } // " + mark);
+        }
+
+        // ② 每位村民的交易产物（判别"匹配失败"还是"窗口没解析出来"）
+        var logIdx = lines.FindIndex(l => l.Contains("[TradeVillagerAction] 村民交易列表"));
+        if (logIdx >= 0)
+        {
+            var ind = new string(' ', lines[logIdx].Length - lines[logIdx].TrimStart().Length);
+            lines.Insert(logIdx + 1, ind + @"try { console.log('[TradeVillagerDiag] 村民=' + (target && target.id) + ' 距离=' + dist.toFixed(2) + ' 条目数=' + ((villager.trades || []).length) + ' 目标物品=' + this.itemName + ' 产物=' + JSON.stringify((villager.trades || []).slice(0, 8).map(function (t) { return (t.outputs || []).map(function (o) { return (o && o.name) + '*' + (o && o.count); }).join('+'); }))); } catch (e) { console.log('[TradeVillagerDiag] 打印失败: ' + (e && e.message)); } // " + mark);
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 村民交易临时诊断日志已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【FollowPlayer 一次性模式】基础包只有「持续跟随」：GoalFollow + dynamic=true，
+    /// 唯一自然结束条件是"目标不可见超时"。而 GoTo 需要坐标、模型拿不到玩家坐标且被禁用于玩家位置，
+    /// 于是「走到我面前」这类指令没有任何动作能表达 —— 只能跟随不停。
+    /// 这里给 FollowPlayer 加 once 参数：到位（dist ≤ min_distance）即停并发 stop('arrived_stop')；
+    /// 同时在提示词里把「走到我面前 / 来我这 / 到我旁边」映射到 once:true，
+    /// 「跟着我 / 跟随我」保持原样（持续跟随）。
+    /// 所有注入行都带 __bakabot_follow_once__ 标记、按行剥离，天然幂等。
+    /// </summary>
+    private static void PatchFollowOnce(string srcDir)
+    {
+        const string mark = "__bakabot_follow_once__";
+
+        // ① FollowPlayer.js：构造参数 + 到位即停
+        var file = Path.Combine(srcDir, "actions", "move", "FollowPlayer.js");
+        if (File.Exists(file))
+        {
+            var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+            var original = content;
+            var lines = new List<string>(content.Split('\n'));
+            lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+            var ci = lines.FindIndex(l => l.Contains("this.unseenTimeout = typeof params.unseen_timeout"));
+            if (ci >= 0)
+            {
+                var ind = new string(' ', lines[ci].Length - lines[ci].TrimStart().Length);
+                lines.Insert(ci + 1, ind + "this.onceMode = !!(params && params.once); // " + mark + "：true = 走到对方身边就停下（不是持续跟随）；⚠️ 不能叫 this.once，会覆盖 EventEmitter.once()");
+            }
+
+            var ai = lines.FindIndex(l => l.Contains("if (dist <= this.minDistance) {"));
+            if (ai >= 0)
+            {
+                var ind = new string(' ', lines[ai].Length - lines[ai].TrimStart().Length + 2);
+                lines.InsertRange(ai + 2, new[]
+                {
+                    ind + "if (this.onceMode) { // " + mark,
+                    ind + "    sendToOwner(this.bot, '✅ 已经走到你身边，停下。'); // " + mark,
+                    ind + "    return this.stop('arrived_stop'); // " + mark,
+                    ind + "} // " + mark
+                });
+            }
+
+            content = string.Join("\n", lines);
+            if (content != original)
+            {
+                File.WriteAllText(file, content, Encoding.UTF8);
+                Console.WriteLine($"[Patch] FollowPlayer once 模式已注入: {file}");
+                VerifyJsSyntax(file);
+            }
+        }
+
+        // ② index.js：提示词映射（只在 once 相关行后追加一行，带标记）
+        var idx = Path.Combine(srcDir, "index.js");
+        if (!File.Exists(idx)) return;
+
+        var src = File.ReadAllText(idx, Encoding.UTF8).Replace("\r\n", "\n");
+        var before = src;
+        var il = new List<string>(src.Split('\n'));
+        il.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        var pi = il.FindIndex(l => l.Contains("min_distance") && l.Contains("max_distance"));
+        if (pi >= 0)
+        {
+            var ind = new string(' ', il[pi].Length - il[pi].TrimStart().Length);
+            il.Insert(pi + 1, ind + "- once: true 表示「走到对方身边就停下」，不是持续跟随。玩家说「走到我面前 / 来我这 / 到我旁边 / 过来一下」时必须填 once: true；只有明确说「跟着我 / 跟随我 / 跟着走」时才省略 once（持续跟随）。 // " + mark);
+        }
+
+        src = string.Join("\n", il);
+        if (src != before)
+        {
+            File.WriteAllText(idx, src, Encoding.UTF8);
+            VerifyJsSyntax(idx);
+        }
+    }
+
+    /// <summary>
+    /// 【附魔书匹配修复】实测复现的两个 bug（用小号假 bot + 合成交易数据驱动真实 TradeVillager 代码）：
+    ///  ① 等级写成中文/罗马数字时解析不出附魔：「爆炸保护四」「爆炸保护IV」→ _parseEnchantment 返回 null
+    ///     → 退化成"物品名必须完全相等"（enchanted_book ≠ 爆炸保护四）→ **把本来正确的村民当成没货跳掉**。
+    ///  ② NBT 里的附魔 id 带命名空间（1.20.5+ / 现代协议是 'minecraft:blast_protection'），
+    ///     而 _matchItem 拿 'blast_protection' 直接 == 比较 → 永远不相等 → 所有附魔书交易都被跳掉。
+    /// 修法都是就地归一，不改匹配整体逻辑。注入行带 __bakabot_trade_enchant__ 标记、按行剥离，幂等。
+    /// </summary>
+    private static void PatchTradeEnchantMatch(string srcDir)
+    {
+        const string mark = "__bakabot_trade_enchant__";
+        var file = Path.Combine(srcDir, "actions", "trade", "TradeVillager.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        // ① 中文/罗马数字等级 → 阿拉伯数字
+        var ni = lines.FindIndex(l => l.Contains("s.replace(/enchanted_book|附魔书|附魔/g, '')"));
+        if (ni >= 0)
+        {
+            var ind = new string(' ', lines[ni].Length - lines[ni].TrimStart().Length);
+            lines.InsertRange(ni + 1, new[]
+            {
+                ind + @"s = s.replace(/[零一二三四五六七八九十]+/g, function (m) { var __cn = { '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 }; if (m === '十') return '10'; if (m.length === 1) return String(__cn[m]); if (m.length === 2 && m[0] === '十') return '1' + __cn[m[1]]; if (m.length === 2 && m[1] === '十') return String(__cn[m[0]]) + '0'; if (m.length === 3 && m[1] === '十') return String(__cn[m[0]]) + String(__cn[m[2]]); return m; }) // " + mark,
+                ind + @"s = s.replace(/([a-z_\u4e00-\u9fa5])(iv|iii|ii|i)$/, function (m, a, b) { return a + ({ 'iii': '3', 'iv': '4', 'ii': '2', 'i': '1' })[b]; }) // " + mark
+            });
+        }
+
+        // ② NBT 附魔 id 去掉 minecraft: 命名空间并小写
+        var ii2 = lines.FindIndex(l => l.Contains("if (id == null) continue;"));
+        if (ii2 >= 0)
+        {
+            var ind = new string(' ', lines[ii2].Length - lines[ii2].TrimStart().Length);
+            lines.Insert(ii2, ind + @"if (typeof id === 'string') id = String(id).toLowerCase().replace(/^minecraft:/, ''); // " + mark);
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 附魔书匹配归一修复已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【窄道自愈】1 格宽通道卡拐角。
+    /// 实测配置（GoTo.js:110-113）：allowParkour=true / allowSprinting=true / allow1by1towers=true。
+    /// 其中 allowParkour 要求起跳点与落点都有约 2 格宽空间，1 格宽通道里判定必然失败 →
+    /// pathfinder 反复重寻路，表现为"卡在拐角打转"；自带的脱困动作（原地跳+前进）在窄道里无效，
+    /// 只能一路数到 30 次然后喊人停下。
+    /// 修法（A 方案）：卡住第 3 次起，先切"窄道模式"（关跑酷/冲刺/1x1塔、maxDropDown=1）重试一次，
+    /// 成功就继续走；仍不行才回落到原有脱困动作。户外正常行走不受影响（属性只在卡住时才改）。
+    /// 注入行都带 __bakabot_tight_mode__ 标记、按行剥离，幂等。
+    /// </summary>
+    private static void PatchPathfinderTightMode(string srcDir)
+    {
+        const string mark = "__bakabot_tight_mode__";
+        var file = Path.Combine(srcDir, "actions", "move", "GoTo.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        var ri = lines.FindIndex(l => l.Contains("this._stuckCount = 0;"));
+        if (ri >= 0)
+        {
+            var ind = new string(' ', lines[ri].Length - lines[ri].TrimStart().Length);
+            lines.Insert(ri + 1, ind + "this._tightTried = false; // " + mark);
+        }
+
+        // 修复原有隐患：_lastPos 从不更新，走远之后 moved 一直大于 0.1 → 卡住永远不会被计数。
+        // 这里在每次"确实移动了"时刷新基准位置并清零计数，让它真正变成「停滞检测」。
+        var mi = lines.FindIndex(l => l.Contains("if (moved < 0.1) {"));
+        if (mi >= 0)
+        {
+            var mind = new string(' ', lines[mi].Length - lines[mi].TrimStart().Length);
+            lines.Insert(mi, mind + "if (moved >= 0.1) { this._lastPos = currentPos.clone(); this._stuckCount = 0; } // " + mark);
+        }
+
+        var si = lines.FindIndex(l => l.Contains("this._stuckCount++;"));
+        if (si >= 0)
+        {
+            var ind = new string(' ', lines[si].Length - lines[si].TrimStart().Length);
+            var m = " // " + mark;
+            lines.InsertRange(si + 1, new[]
+            {
+                ind + "if (!this._tightTried && this._stuckCount >= 3) {" + m,
+                ind + "    this._tightTried = true;" + m,
+                ind + "    try {" + m,
+                ind + "        var __tmMv = this.bot.pathfinder.movements;" + m,
+                ind + "        if (__tmMv) { __tmMv.allowParkour = false; __tmMv.allowSprinting = false; __tmMv.allow1by1towers = false; __tmMv.maxDropDown = 1; }" + m,
+                ind + "        console.log('[GoTo] 疑似卡在窄道，切换窄道模式重试（关跑酷/冲刺/1x1塔）');" + m,
+                ind + "        sendToOwner(this.bot, '🚧 我好像卡在窄道里了，换个更保守的走法再试一次~');" + m,
+                ind + "        this.bot.pathfinder.setGoal(null);" + m,
+                ind + "        if (this.bot.clearControlStates) this.bot.clearControlStates();" + m,
+                ind + "        this._stuckCount = 0;" + m,
+                ind + "        var __tmSelf = this;" + m,
+                ind + "        setTimeout(function () { if (__tmSelf.isExecuting && !__tmSelf.isPaused) __tmSelf.bot.pathfinder.setGoal(__tmSelf.goal, false); }, 300);" + m,
+                ind + "        return;" + m,
+                ind + "    } catch (e) { console.log('[GoTo] 窄道模式切换失败: ' + (e && e.message)); }" + m,
+                ind + "}" + m
+            });
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 窄道自愈已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【附魔书 components 修复】MC 26.2（MC_VERSION=26.2）物品数据走 components，
+    /// 附魔在 `stored_enchantments` 组件里，而 _getStoredEnchantments 只读 item.nbt →
+    /// 一律返回 null → _matchItem 判定"这村民没这条交易" → **把正确的村民当成没货跳掉**。
+    /// 另外物品名可能带 minecraft: 前缀（`minecraft:enchanted_book`），原判断直接 != 'enchanted_book'。
+    /// 修法：① 新增模块级 __bakabotEnchantsFromComponents()，兼容数组/对象两种 components 形状；
+    ///       ② _getStoredEnchantments 在无 nbt 时改走 components；
+    ///       ③ enchanted_book 名称比较前去掉命名空间；
+    ///       ④ 跳过某位村民时**在游戏内播报**诊断（控制台日志用户看不到，聊天里能看到）。
+    /// 全部带 __bakabot_trade_comp__ 标记、按行剥离，幂等。
+    /// </summary>
+    private static void PatchTradeEnchantComponents(string srcDir)
+    {
+        const string mark = "__bakabot_trade_comp__";
+        var file = Path.Combine(srcDir, "actions", "trade", "TradeVillager.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        // ⓪ 模块级：诊断写文件（不进聊天，避免在别人服务器刷屏）
+        var di = lines.FindIndex(l => l.Contains("const { EventEmitter } = require('events');"));
+        if (di >= 0)
+        {
+            var dm = " // " + mark;
+            lines.InsertRange(di + 1, new[]
+            {
+                "function __bakabotTradeDiag(obj) {" + dm,
+                "  try {" + dm,
+                "    var __dfs = require('fs');" + dm,
+                "    var __dpath = require('path');" + dm,
+                "    var __df = __dpath.join(__dirname, '..', '..', '..', 'trade_diag.log');" + dm,
+                "    __dfs.appendFileSync(__df, new Date().toISOString() + ' ' + JSON.stringify(obj) + String.fromCharCode(10), 'utf8');" + dm,
+                "  } catch (e) {}" + dm,
+                "}" + dm
+            });
+        }
+
+        // ① 模块级 helper（紧跟 require 之后）
+        var ri = lines.FindIndex(l => l.Contains("const { EventEmitter } = require('events');"));
+        if (ri >= 0)
+        {
+            var m = " // " + mark;
+            lines.InsertRange(ri + 1, new[]
+            {
+                "function __bakabotEnchantsFromComponents(item) {" + m,
+                "  try {" + m,
+                "    var comps = item && item.components;" + m,
+                "    if (!comps) return null;" + m,
+                "    var out = [];" + m,
+                "    function __take(map) {" + m,
+                "      if (!map || typeof map !== 'object') return;" + m,
+                "      Object.keys(map).forEach(function (k) {" + m,
+                "        var v = map[k];" + m,
+                "        var lvl = (v && typeof v === 'object') ? (v.level != null ? v.level : (v.lvl != null ? v.lvl : 1)) : v;" + m,
+                "        if (lvl == null) lvl = 1;" + m,
+                "        out.push({ id: String(k).toLowerCase().replace(/^minecraft:/, ''), lvl: parseInt(lvl, 10) || 1 });" + m,
+                "      });" + m,
+                "    }" + m,
+                "    var arr = Array.isArray(comps) ? comps : Object.keys(comps).map(function (k) { return { type: k, data: comps[k] }; });" + m,
+                "    for (var i = 0; i < arr.length; i++) {" + m,
+                "      var c = arr[i] || {};" + m,
+                "      var t = String(c.type || '').toLowerCase();" + m,
+                "      if (t.indexOf('stored_enchantments') >= 0 || t.indexOf('enchantments') >= 0) {" + m,
+                "        var d = c.data || {};" + m,
+                "        __take(d.levels || d.enchantments || d);" + m,
+                "      }" + m,
+                "    }" + m,
+                "    return out.length ? out : null;" + m,
+                "  } catch (e) { return null; }" + m,
+                "}" + m
+            });
+        }
+
+        // ② _getStoredEnchantments：没有 nbt 时改用 components
+        var gi = lines.FindIndex(l => l.Contains("if (!item || !item.nbt) {"));
+        if (gi >= 0)
+        {
+            var ind = new string(' ', lines[gi].Length - lines[gi].TrimStart().Length);
+            lines.InsertRange(gi, new[]
+            {
+                ind + "if (item && !item.nbt && item.components) { // " + mark,
+                ind + "    var __ce = __bakabotEnchantsFromComponents(item); // " + mark,
+                ind + "    if (__ce && __ce.length) return __ce; // " + mark,
+                ind + "} // " + mark
+            });
+        }
+
+        // ②-b 函数开头优先用 prismarine-item 的归一化 getter（item.enchants）：
+        //      它内部同时覆盖 componentMap 与 nbt，并且已把附魔名去掉命名空间。
+        //      拿不到（旧版本会抛 "Don't know how to get the enchants"）时静默回落。
+        var hi = lines.FindIndex(l => l.Contains("_getStoredEnchantments(item) {"));
+        if (hi >= 0)
+        {
+            var ind = new string(' ', lines[hi].Length - lines[hi].TrimStart().Length + 4);
+            var m2 = " // " + mark;
+            lines.InsertRange(hi + 1, new[]
+            {
+                ind + "try {" + m2,
+                ind + "    var __pe = item ? item.enchants : null;" + m2,
+                ind + "    if (Array.isArray(__pe) && __pe.length) {" + m2,
+                ind + "        var __po = [];" + m2,
+                ind + "        for (var __pi = 0; __pi < __pe.length; __pi++) {" + m2,
+                ind + "            var __px = __pe[__pi] || {};" + m2,
+                ind + "            var __pid = __px.name != null ? __px.name : __px.id;" + m2,
+                ind + "            if (__pid == null) continue;" + m2,
+                ind + "            __po.push({ id: String(__pid).toLowerCase().replace(/^minecraft:/, ''), lvl: parseInt(__px.lvl != null ? __px.lvl : __px.level, 10) || 1 });" + m2,
+                ind + "        }" + m2,
+                ind + "        if (__po.length) return __po;" + m2,
+                ind + "    }" + m2,
+                ind + "} catch (e) { /* 旧版本没有 enchants getter */ }" + m2
+            });
+        }
+
+        // ③-b 堵住"名字兜底买错书"：附魔解析失败时，只有明确泛泛要"一本附魔书"才允许匹配任意附魔书，
+        //      否则（例如传了认不出的附魔名）一律视为不匹配 —— 宁可跳过，也不乱买一本回去。
+        // ⚠️ 这一行是**替换**而不是新增，所以**不能用会被剥离的行标记**（否则剥离时整行被删，
+        //    下次 _matchItem 会拿 enchant=null 去比较而抛错）。用独立注释 __bakabot_comp_fn__。
+        // ⚠️ 锚点必须限定在 _matchItem 内部：文件里 `!== 'enchanted_book'` 有多处（别的注入行也含），
+        //    用全局 FindIndex 会把判断插到 execute() 里，引用未定义变量直接抛错。
+        lines.RemoveAll(l => l.Contains("__bakabot_comp_fn__", StringComparison.Ordinal));
+        var gate = "if (!enchant) { var __fn = String(name || '').toLowerCase().replace(/^minecraft:/, ''); var __fbook = String(item.name || '').toLowerCase().replace(/^minecraft:/, '') === 'enchanted_book'; if (__fn === 'enchanted_book' || __fn.indexOf('附魔书') >= 0) return __fbook; return nameOk; } /* __bakabot_comp_fn__ */";
+        var mm = lines.FindIndex(l => l.Contains("_matchItem(item, name, enchant)"));
+        if (mm >= 0)
+        {
+            var fi = lines.FindIndex(mm, l => l.Contains("if (!enchant)") && l.Contains("nameOk"));
+            if (fi >= 0)
+            {
+                var find = new string(' ', lines[fi].Length - lines[fi].TrimStart().Length);
+                lines[fi] = find + gate;
+            }
+            else
+            {
+                var bi = lines.FindIndex(mm, l => l.Contains("!== 'enchanted_book'"));
+                if (bi >= 0)
+                {
+                    var bind = new string(' ', lines[bi].Length - lines[bi].TrimStart().Length);
+                    lines.Insert(bi, bind + gate);
+                }
+            }
+        }
+
+        // ③ enchanted_book 名称比较去掉命名空间
+        var ni = lines.FindIndex(l => l.Contains("!== 'enchanted_book'"));
+        if (ni >= 0)
+        {
+            lines[ni] = lines[ni].Replace("String(item.name || '').toLowerCase() !== 'enchanted_book'",
+                                          "String(item.name || '').toLowerCase().replace(/^minecraft:/, '') !== 'enchanted_book'");
+        }
+
+        // ④ 诊断**写本地文件**（别人服务器不能刷屏）：<实例>/trade_diag.log
+        var si = lines.FindIndex(l => l.Contains("的交易（或已售罄），换下一位村民试试"));
+        if (si >= 0)
+        {
+            var ind = new string(' ', lines[si].Length - lines[si].TrimStart().Length);
+            lines.Insert(si, ind + @"try { __bakabotTradeDiag({ ev: 'skip', villager: (target && target.id), dist: (typeof dist === 'number' ? Math.round(dist * 10) / 10 : null), trades: ((villager && villager.trades) || []).length, item: this.itemName, parsed: this._parseEnchantment(this.itemName), outs: ((villager && villager.trades) || []).slice(0, 3).map(function (t) { return (t.outputs || []).map(function (o) { return (o && o.name) + '*' + (o && o.count) + (o && o.nbt ? '[nbt]' : '') + (o && o.components ? '[comp]' : '') + (o && o.enchants ? '[ench]' : ''); }).join('+'); }), raw0: (function () { try { return JSON.stringify(((villager && villager.trades) || [])[0] || null).slice(0, 1200); } catch (e) { return null; } })() }); } catch (e) {} // " + mark);
+        }
+
+        // ⑤ 匹配成功也记一条（对照"第几个村民"用）
+        var mi2 = lines.FindIndex(l => l.Contains("的交易，开始兑换..."));
+        if (mi2 >= 0)
+        {
+            var ind2 = new string(' ', lines[mi2].Length - lines[mi2].TrimStart().Length);
+            lines.Insert(mi2, ind2 + @"try { __bakabotTradeDiag({ ev: 'match', villager: (target && target.id), dist: (typeof dist === 'number' ? Math.round(dist * 10) / 10 : null), trades: ((villager && villager.trades) || []).length, item: this.itemName, parsed: this._parseEnchantment(this.itemName), cands: candidates.length }); } catch (e) {} // " + mark);
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 附魔书 components 支持已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【跟随时的窄道自愈】FollowPlayer 用 GoalFollow + dynamic，卡在拐角时没有任何检测，
+    /// 会一直"按键前进但动不了"。这里在 _tick 里加停滞检测：3 秒无位移且还没到位 →
+    /// 切窄道模式（关跑酷/冲刺/1x1塔、maxDropDown=1）重新下发跟随目标。
+    /// 带 __bakabot_follow_tight__ 标记、按行剥离，幂等。
+    /// </summary>
+    private static void PatchFollowTightMode(string srcDir)
+    {
+        const string mark = "__bakabot_follow_tight__";
+        var file = Path.Combine(srcDir, "actions", "move", "FollowPlayer.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        var ai = lines.FindIndex(l => l.Contains("const dist = myPos.distanceTo(tPos);"));
+        if (ai >= 0)
+        {
+            var ind = new string(' ', lines[ai].Length - lines[ai].TrimStart().Length);
+            var m = " // " + mark;
+            lines.InsertRange(ai + 1, new[]
+            {
+                ind + "try {" + m,
+                ind + "    if (!this._ftLastPos) { this._ftLastPos = myPos.clone(); this._ftLastAt = Date.now(); }" + m,
+                ind + "    else if (myPos.distanceTo(this._ftLastPos) > 0.4) { this._ftLastPos = myPos.clone(); this._ftLastAt = Date.now(); }" + m,
+                ind + "    else if (Date.now() - this._ftLastAt > 3000 && dist > this.minDistance) {" + m,
+                ind + "        this._ftLastAt = Date.now();" + m,
+                ind + "        var __ftMv = this.bot.pathfinder.movements;" + m,
+                ind + "        if (__ftMv) { __ftMv.allowParkour = false; __ftMv.allowSprinting = false; __ftMv.allow1by1towers = false; __ftMv.maxDropDown = 1; }" + m,
+                ind + "        console.log('[FollowPlayer] 卡住 3 秒无位移，切窄道模式重试');" + m,
+                ind + "        this.bot.pathfinder.setGoal(null);" + m,
+                ind + "        this.bot.pathfinder.setGoal(new goals.GoalFollow(target.entity, this.minDistance), true);" + m,
+                ind + "    }" + m,
+                ind + "} catch (e) {}" + m
+            });
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 跟随窄道自愈已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 用途：交易类问题里最容易搞错的是"谁理解错了"——是模型把用户要的附魔写错，还是匹配逻辑漏判。
+    /// 有这行就能一眼分开：{"ev":"plan","user":"…爆炸保护四…","todo":[{"action":"TradeVillager","params":{"item_name":"sharpness 4"}}]}
+    /// 只写文件、不进游戏聊天（别人服务器不能刷屏）。带 __bakabot_plan_diag__ 标记，按行剥离，幂等。
+    /// 定位完成后把本方法与调用一起删掉即可。
+    /// </summary>
+    private static void PatchPlanDiag(string srcDir)
+    {
+        const string mark = "__bakabot_plan_diag__";
+        var file = Path.Combine(srcDir, "index.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        var ai = lines.FindIndex(l => l.Contains("chatHistory.push({ user: prompt"));
+        if (ai >= 0)
+        {
+            var ind = new string(' ', lines[ai].Length - lines[ai].TrimStart().Length);
+            lines.Insert(ai, ind + @"try { (function () { var __fs = require('fs'), __p = require('path'); var __f = __p.join(__dirname, '..', 'trade_diag.log'); __fs.appendFileSync(__f, new Date().toISOString() + ' ' + JSON.stringify({ ev: 'plan', user: prompt, action: response.action, todo: response.todo_list || null }) + String.fromCharCode(10), 'utf8'); })(); } catch (e) {} // " + mark);
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 计划落盘诊断已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【"有哪些附魔书"清单】用户反馈：模型偶尔把附魔名听错（例如要爆炸保护却传 sharpness），
+    /// 这时机器人只会一遍遍"换下一位村民"，用户完全不知道附近到底有哪些书、自己该改口成什么。
+    /// 做法：走过每个村民时把该村民卖的附魔书（附魔名 + 等级）收集起来，
+    ///   任务结束时**只发一条**汇总（不刷屏）：📚 这些村民卖的附魔书：blast_protection 4、silk_touch 1…
+    /// 同时把完整清单写进 trade_diag.log（ev:books）。
+    /// 带 __bakabot_book_report__ 标记、按行剥离，幂等。
+    /// </summary>
+    private static void PatchTradeBookReport(string srcDir)
+    {
+        const string mark = "__bakabot_book_report__";
+        var file = Path.Combine(srcDir, "actions", "trade", "TradeVillager.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        // ① 每打开一个村民就把书收集起来
+        var ci = lines.FindIndex(l => l.Contains("[TradeVillagerAction] 村民交易列表"));
+        if (ci >= 0)
+        {
+            var ind = new string(' ', lines[ci].Length - lines[ci].TrimStart().Length);
+            lines.Insert(ci + 1, ind +
+                "try { if (!this._bbBooks) this._bbBooks = []; var __bbAll = (villager.trades || []); for (var __bi = 0; __bi < __bbAll.length; __bi++) { var __bo = (__bbAll[__bi] && __bbAll[__bi].outputs) || []; for (var __bj = 0; __bj < __bo.length; __bj++) { var __bk = __bo[__bj]; if (!__bk) continue; if (String(__bk.name || '').toLowerCase().replace(/^minecraft:/, '') !== 'enchanted_book') continue; var __bs = this._getStoredEnchantments(__bk) || []; for (var __bn = 0; __bn < __bs.length; __bn++) { this._bbBooks.push(String(__bs[__bn].id) + ' ' + __bs[__bn].lvl); } } } } catch (e) {} // " + mark);
+        }
+
+        // ② 任务结束时只发一条汇总（并写日志）
+        var si = lines.FindIndex(l => l.Contains("未达到 ${targetTotal}"));
+        if (si >= 0)
+        {
+            var ind = new string(' ', lines[si].Length - lines[si].TrimStart().Length);
+            lines.Insert(si, ind +
+                "try { if (this._bbBooks && this._bbBooks.length) { var __bbU = []; for (var __bu = 0; __bu < this._bbBooks.length; __bu++) { if (__bbU.indexOf(this._bbBooks[__bu]) === -1) __bbU.push(this._bbBooks[__bu]); } sendToOwner(this.bot, '📚 这些村民卖的附魔书：' + __bbU.slice(0, 12).join('、')); __bakabotTradeDiag({ ev: 'books', item: this.itemName, books: __bbU }); } } catch (e) {} // " + mark);
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 附魔书清单播报已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【交易成交校验】用户实测：要"爆炸保护1"，村民选对了，但买到的是最上面那本"精准采集"。
+    /// mineflayer 本身不限制索引（villager.trade(index) 会 select_trade{slot:index}），
+    /// 所以只剩两种可能：① 索引被算成 0；② 服务器/转换服没理会 select_trade（对方服挂着 ViaVersion 转换）。
+    /// 两种都表现为"点错选项"，而原代码只按附魔名统计背包——买错的书根本不会被计入，
+    /// 于是白白消耗材料 + 干等 6 秒轮询。这里补三件事：
+    ///   ① 每次点交易前记录 (村民, 索引, 期望产物) 到 trade_diag.log；
+    ///   ② 成交后用"附魔书快照差值"算出**实际到手的是什么书**；
+    ///   ③ 到手的书和目标不一致 → 立刻播报并停止，不再继续浪费材料。
+    /// 带 __bakabot_buy_verify__ 标记、按行剥离，幂等。
+    /// </summary>
+    private static void PatchTradeBuyVerify(string srcDir)
+    {
+        const string mark = "__bakabot_buy_verify__";
+        var file = Path.Combine(srcDir, "actions", "trade", "TradeVillager.js");
+        if (!File.Exists(file)) return;
+
+        var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+        var original = content;
+        var lines = new List<string>(content.Split('\n'));
+        lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+        // ① helper：背包里所有附魔书的 {附魔名 等级: 数量}
+        var ci = lines.FindIndex(l => l.Contains("_countItemsByName(name) {"));
+        if (ci >= 0)
+        {
+            var ind = new string(' ', lines[ci].Length - lines[ci].TrimStart().Length);
+            var m = " // " + mark;
+            lines.InsertRange(ci, new[]
+            {
+                ind + "_bbBookSnapshot() {" + m,
+                ind + "    var map = {};" + m,
+                ind + "    try {" + m,
+                ind + "        var its = this.bot.inventory.items() || [];" + m,
+                ind + "        for (var i = 0; i < its.length; i++) {" + m,
+                ind + "            var it = its[i];" + m,
+                ind + "            if (!it || String(it.name || '').toLowerCase().replace(/^minecraft:/, '') !== 'enchanted_book') continue;" + m,
+                ind + "            var st = this._getStoredEnchantments(it) || [];" + m,
+                ind + "            for (var j = 0; j < st.length; j++) {" + m,
+                ind + "                var k = String(st[j].id) + ' ' + st[j].lvl;" + m,
+                ind + "                map[k] = (map[k] || 0) + (it.count || 1);" + m,
+                ind + "            }" + m,
+                ind + "        }" + m,
+                ind + "    } catch (e) {}" + m,
+                ind + "    return map;" + m,
+                ind + "}" + m
+            });
+        }
+
+        // ② 点交易前记录索引与期望产物
+        var ti = lines.FindIndex(l => l.Contains("await villager.trade(index, uses);"));
+        if (ti >= 0)
+        {
+            var ind = new string(' ', lines[ti].Length - lines[ti].TrimStart().Length);
+            lines.Insert(ti, ind + "try { __bakabotTradeDiag({ ev: 'try', villager: (target && target.id), index: index, uses: uses, expect: (out && out.name), item: this.itemName }); } catch (e) {} // " + mark);
+        }
+
+        // ③ 成交后核对实际到手的书
+        var ai = lines.FindIndex(l => l.Contains("const beforeCount = this._countItemsByName(this.itemName);"));
+        if (ai >= 0)
+        {
+            var ind = new string(' ', lines[ai].Length - lines[ai].TrimStart().Length);
+            lines.Insert(ai, ind + "var __bbSnapBefore = this._bbBookSnapshot(); // " + mark);
+        }
+
+        var bi = lines.FindIndex(l => l.Contains("madeProgress = true;"));
+        if (bi >= 0)
+        {
+            var ind = new string(' ', lines[bi].Length - lines[bi].TrimStart().Length);
+            var m2 = " // " + mark;
+            lines.InsertRange(bi, new[]
+            {
+                ind + "try {" + m2,
+                ind + "    var __bbAfter = this._bbBookSnapshot();" + m2,
+                ind + "    var __bbGot = [];" + m2,
+                ind + "    for (var __k in __bbAfter) { var __d = __bbAfter[__k] - ((__bbSnapBefore && __bbSnapBefore[__k]) || 0); if (__d > 0) __bbGot.push(__k + ' x' + __d); }" + m2,
+                ind + "    var __bbWant = this._parseEnchantment(this.itemName);" + m2,
+                ind + "    var __bbWrong = [];" + m2,
+                ind + "    for (var __gi = 0; __gi < __bbGot.length; __gi++) {" + m2,
+                ind + "        var __gkey = __bbGot[__gi].replace(/ x[0-9]+$/, '');" + m2,
+                ind + "        var __ok = __bbWant && (__gkey === (String(__bbWant.id) + ' ' + __bbWant.level)) || (__bbWant && __gkey.indexOf(String(__bbWant.id) + ' ') === 0);" + m2,
+                ind + "        if (!__ok) __bbWrong.push(__bbGot[__gi]);" + m2,
+                ind + "    }" + m2,
+                ind + "    __bakabotTradeDiag({ ev: 'bought', villager: (target && target.id), index: index, item: this.itemName, got: __bbGot, wrong: __bbWrong });" + m2,
+                ind + "    if (__bbWrong.length) {" + m2,
+                ind + "        sendToOwner(this.bot, '⚠️ 交易选项好像错位了：我要的是「' + this.itemName + '」，实际到手 ' + __bbWrong.join('、') + '。我先停下，不再浪费材料。');" + m2,
+                ind + "        stopAll = true;" + m2,
+                ind + "    }" + m2,
+                ind + "} catch (e) {}" + m2
+            });
+        }
+
+        content = string.Join("\n", lines);
+        if (content == original) return;
+        File.WriteAllText(file, content, Encoding.UTF8);
+        Console.WriteLine($"[Patch] 交易成交校验已注入: {file}");
+        VerifyJsSyntax(file);
+    }
+
+    /// <summary>
+    /// 【寻路卡住自愈 · 全局版】用户实测：让机器人去交易，走到"一格宽的洞"里拐角卡住十几秒不动。
+    /// 那条路走的是 `this.bot.pathfinder.goto(...)`（TradeVillager 的走近、DropItemAction 的走到玩家），
+    /// **不经过 GoTo 动作**，所以 PatchPathfinderTightMode 覆盖不到。
+    /// 这里给这些裸 goto 加一个共享包装 __bakabotGotoTight(bot, goal, label)：
+    ///   连续 3 秒无位移 → 取消当前目标 → 切窄道模式（关跑酷/冲刺/1x1塔、maxDropDown=1）→ 重试一次。
+    /// 带 __bakabot_goto_tight__ 标记；替换行用独立注释 __bakabot_goto_tight_fn__（避免剥离时把语句删掉），幂等。
+    /// </summary>
+    private static void PatchGotoTightRetry(string srcDir)
+    {
+        const string mark = "__bakabot_goto_tight__";
+        const string fnMark = "__bakabot_goto_tight_fn__";
+
+        var helper = new[]
+        {
+            "async function __bakabotGotoTight(bot, goal, label) { // " + mark,
+            "  var pf = bot && bot.pathfinder; // " + mark,
+            "  if (!pf || typeof pf.goto !== 'function') return false; // " + mark,
+            "  var tightTried = false; // " + mark,
+            "  for (var attempt = 0; attempt < 2; attempt++) { // " + mark,
+            "    var anchor = bot.entity && bot.entity.position ? bot.entity.position.clone() : null; // " + mark,
+            "    var lastAt = Date.now(); var stuck = false; // " + mark,
+            "    var wd = setInterval(function () { try { if (!bot.entity || !bot.entity.position) return; if (anchor && bot.entity.position.distanceTo(anchor) > 0.5) { anchor = bot.entity.position.clone(); lastAt = Date.now(); return; } if (Date.now() - lastAt > 3000) stuck = true; } catch (e) {} }, 700); // " + mark,
+            "    try { // " + mark,
+            "      var raced = await Promise.race([ pf.goto(goal).then(function () { return 'ok'; }), (async function () { while (!stuck) { await new Promise(function (r) { setTimeout(r, 300); }); } return 'stuck'; })() ]); // " + mark,
+            "      clearInterval(wd); // " + mark,
+            "      if (raced === 'ok') return true; // " + mark,
+            "    } catch (e) { clearInterval(wd); } // " + mark,
+            "    clearInterval(wd); // " + mark,
+            "    try { pf.setGoal(null); } catch (e) {} // " + mark,
+            "    if (tightTried) return false; // " + mark,
+            "    tightTried = true; // " + mark,
+            "    var mv = pf.movements; // " + mark,
+            "    if (mv) { mv.allowParkour = false; mv.allowSprinting = false; mv.allow1by1towers = false; mv.maxDropDown = 1; } // " + mark,
+            "    console.log('[PathTight] ' + (label || '') + ' 卡住 3 秒无位移，切换窄道模式重试'); // " + mark,
+            "    await new Promise(function (r) { setTimeout(r, 300); }); // " + mark,
+            "  } // " + mark,
+            "  return false; // " + mark,
+            "} // " + mark
+        };
+
+        // 三个文件：都插 helper，并把裸 goto 换成本包装
+        var targets = new[]
+        {
+            new { Rel = Path.Combine("actions", "trade", "TradeVillager.js"), Label = "村民" },
+            new { Rel = Path.Combine("actions", "basic", "DropItemAction.js"), Label = "玩家" }
+        };
+
+        foreach (var t in targets)
+        {
+            var file = Path.Combine(srcDir, t.Rel);
+            if (!File.Exists(file)) continue;
+
+            var content = File.ReadAllText(file, Encoding.UTF8).Replace("\r\n", "\n");
+            var original = content;
+            var lines = new List<string>(content.Split('\n'));
+            lines.RemoveAll(l => l.Contains(mark, StringComparison.Ordinal));
+
+            var ri = lines.FindIndex(l => l.Contains("const { EventEmitter } = require('events');"));
+            if (ri >= 0) lines.InsertRange(ri + 1, helper);
+
+            for (var i = 0; i < lines.Count; i++)
+            {
+                if (!lines[i].Contains("await this.bot.pathfinder.goto(")) continue;
+                var ind = new string(' ', lines[i].Length - lines[i].TrimStart().Length);
+                var expr = lines[i].Trim();
+                // await this.bot.pathfinder.goto(X);  →  await __bakabotGotoTight(this.bot, X, 'label'); /* fnMark */
+                var start = expr.IndexOf("goto(") + 5;
+                var end = expr.LastIndexOf(");");
+                if (end <= start) continue;
+                var goalExpr = expr.Substring(start, end - start);
+                lines[i] = ind + "await __bakabotGotoTight(this.bot, " + goalExpr + ", '" + t.Label + "'); /* " + fnMark + " */";
+            }
+
+            content = string.Join("\n", lines);
+            if (content == original) continue;
+            File.WriteAllText(file, content, Encoding.UTF8);
+            Console.WriteLine($"[Patch] 寻路卡住自愈（全局版）已注入: {file}");
+            VerifyJsSyntax(file);
+        }
+    }
+
     private static void PatchTaskContinuityDiag(string srcDir)
     {
         const string marker = "__bakabot_continuity__";
@@ -2631,6 +3397,87 @@ module.exports = StrictAutoTeleportLogin;
         return patchCode + content;
     }
 
+    /// <summary>
+    /// 禁止挖掘「硬闸」。UI 上这个开关的承诺是"开启后禁用一切挖掘功能（保存后即时生效，无需重启）"，
+    /// 但基础包只在三处做了门禁：LLM 提示词、MineBlocks.execute、ClearArea.execute。
+    /// 真正会破坏方块的入口远不止这三处 —— mineflayer 里所有破坏最终都走 bot.dig，
+    /// 包括 MineBlocks/ClearArea 内部的 collectBlock、PlaceBlock/FillArea/BuildGediao 的"清障"、
+    /// FarmAction 收割、以及寻路挖穿（movements.canDig）。实测 FORBID_MINING=true 时机器人仍在破坏方块。
+    /// 因此这里在 bot 创建后包一层 bot.dig：开关为 true 时一律 reject，绝不落到实际挖掘包。
+    /// 开关**每次调用都重读实例根目录 .env**（启动器开关写盘即生效），不依赖启动时的 process.env 快照。
+    /// 整块带独立标记、按标记整段剥离，天然幂等；锚点 `let isThinking = false;` 必须行首唯一（已在基础包核对）。
+    /// </summary>
+    private string PatchForbidMiningGuard(string content)
+    {
+        // 先剥离旧块（含注释边界），保证重复打补丁不会叠加
+        content = Regex.Replace(content,
+            @"// ===== Bakabot 禁止挖掘硬闸 __bakabot_mining_guard__ =====\r?\n[\s\S]*?// ===== END Bakabot 禁止挖掘硬闸 =====\r?\n?",
+            "");
+
+        if (content.Contains("__bakabot_mining_guard__"))
+            return content;
+
+        var patchCode = @"// ===== Bakabot 禁止挖掘硬闸 __bakabot_mining_guard__ =====
+(function () {
+  try {
+    if (typeof bot === 'undefined' || !bot || global.__bakabotMiningGuard) return;
+    global.__bakabotMiningGuard = true;
+    var __bmgFs = require('fs');
+    var __bmgPath = require('path');
+    var __bmgEnvFiles = [];
+    try { __bmgEnvFiles.push(__bmgPath.join(__dirname, '..', '.env')); } catch (e) {}
+    try { __bmgEnvFiles.push(__bmgPath.join(__dirname, '.env')); } catch (e) {}
+    try { __bmgEnvFiles.push(__bmgPath.join(process.cwd(), '.env')); } catch (e) {}
+    // 热开关：每次判定都重读 .env 文件（启动器开关写盘即生效），读不到才回落到启动时的 env
+    function __bmgForbid() {
+      for (var i = 0; i < __bmgEnvFiles.length; i++) {
+        try {
+          var __t = __bmgFs.readFileSync(__bmgEnvFiles[i], 'utf8');
+          var __m = __t.match(/^[ \t]*FORBID_MINING[ \t]*=[ \t]*(\S+)/im);
+          if (__m) return /^(true|1|yes)$/i.test(String(__m[1]).trim());
+        } catch (e) {}
+      }
+      return String(process.env.FORBID_MINING || '').toLowerCase() === 'true';
+    }
+    // 唯一硬闸：mineflayer 所有「破坏方块」最终都走 bot.dig
+    if (typeof bot.dig === 'function' && !bot.__bakabotDigGuard) {
+      var __bmgOrigDig = bot.dig.bind(bot);
+      bot.dig = function (block) {
+        if (__bmgForbid()) {
+          var __n = (block && block.name) || '目标方块';
+          try { console.log('[ForbidMining] 已拦截挖掘: ' + __n); } catch (e) {}
+          return Promise.reject(new Error('禁止挖掘开关已开启，已阻止破坏方块（' + __n + '）'));
+        }
+        return __bmgOrigDig.apply(null, arguments);
+      };
+      bot.__bakabotDigGuard = true;
+    }
+    // 顺带让寻路不规划「挖穿」路线：只影响效率，安全性由上面的 dig 闸保证
+    var __bmgSyncCanDig = function () {
+      try {
+        var __mv = bot.pathfinder && bot.pathfinder.movements;
+        if (!__mv) return;
+        if (__bmgForbid()) __mv.canDig = false;
+      } catch (e) {}
+    };
+    __bmgSyncCanDig();
+    try {
+      var __bmgTimer = setInterval(__bmgSyncCanDig, 5000);
+      if (__bmgTimer && typeof __bmgTimer.unref === 'function') __bmgTimer.unref();
+    } catch (e) {}
+  } catch (e) {}
+})();
+// ===== END Bakabot 禁止挖掘硬闸 =====
+";
+
+        // 插在 bot 创建之后（该锚点行首唯一，基础包与实例均核对过；行尾可能是 CRLF，必须允许 \r）
+        var m = Regex.Match(content, @"^let isThinking = false;[ \t]*\r?$", RegexOptions.Multiline);
+        if (!m.Success)
+            return content;
+
+        return content.Insert(m.Index, patchCode);
+    }
+
     private string PatchQQBridgeV2(string content)
     {
         // 先剥离旧版 QQ 桥接补丁（与初版共用标记），Repatch 时保证重新注入最新版
@@ -2846,6 +3693,16 @@ module.exports = StrictAutoTeleportLogin;
               } else {
                 sysPrompt = String(sysPrompt) + '\n\n# 当前对话对象（QQ 用户，未绑定）\n当前指令来自未绑定游戏 ID 的 QQ 用户。若指令需要指定玩家才能执行（如传送、跟随、丢物品给玩家），请直接回复：你还没有绑定游戏玩家，无法执行该指令。不要编造玩家名。';
               }
+              // 语义修正（b）：绑定名恰好等于机器人自己的游戏名时，避免把「服务对象」当成主人
+              // （现象：机器人会说「我的主人叫 xxx」，而 xxx 就是它自己）
+              // 只在撞名时追加，普通情况一字不改，不影响既有表现。
+              try {
+                var __bqSelf = (global.__bakabotQQBot && global.__bakabotQQBot.username) || '';
+                if (ch.player && __bqSelf && String(ch.player).trim().toLowerCase() === String(__bqSelf).trim().toLowerCase()) {
+                  var __bqOwners = (global.__bcQQOwners || []).join('、');
+                  sysPrompt = String(sysPrompt) + '\n\n# 重要：服务对象不是主人\n本次服务对象「' + ch.player + '」恰好与你自己（机器人）的游戏名相同，这只是 QQ 白名单里的绑定结果，不代表它是你的主人。' + (__bqOwners ? '\n机器人配置的主人名单是：「' + __bqOwners + '」。' : '') + '\n因此：① 不要称呼对方为主人；② 也不要把你自己当成主人；③ 被问到「你的主人是谁」时，按上面的主人名单回答，不要拿你自己或本次服务对象的名字当答案。';
+                }
+              } catch (e) {}
               sysPrompt = String(sysPrompt) + '\n\n# QQ 回复规则\n你的回复会通过 QQ 发送给对方。除非用户明确要求“在游戏内说话/发消息”，否则不要使用 Command 动作在游戏内发聊天消息；直接放在回复里即可。';
               return Promise.resolve(__origGen.call(this, sysPrompt, hist, userPrompt)).then(function(r) {
                 global.__bakabotQQAIMsg = true;
